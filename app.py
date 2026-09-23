@@ -422,9 +422,10 @@ def calcular_componentes_factor_m(
       suffixes=("_PEDIDO", "_RECETA"),
   )
 
-  df_merged["REQ_COMPONENTE"] = (
-      df_merged["REQUERIMIENTO"] * df_merged["CANTIDAD"]
-  )
+  # Se toma directamente la cantidad de la receta (ya que el reporte de SAP/orden ya incluye el requerimiento total)
+  df_merged["REQ_COMPONENTE"] = pd.to_numeric(
+      df_merged["CANTIDAD"], errors="coerce"
+  ).fillna(0)
 
   col_comp_receta = next(
       (c for c in df_merged.columns if "COMPONENTE" in c), "COD COMPONENTE"
