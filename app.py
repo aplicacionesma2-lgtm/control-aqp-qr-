@@ -191,14 +191,20 @@ def cargar_pedido():
     )
     return pedido, catalogo, factor_lima
   except Exception:
-    return pd.DataFrame(columns=PEDIDO_HEADERS), pd.DataFrame(columns=CATALOGO_HEADERS), pd.DataFrame()
+    return (
+        pd.DataFrame(columns=PEDIDO_HEADERS),
+        pd.DataFrame(columns=CATALOGO_HEADERS),
+        pd.DataFrame(),
+    )
 
 
 @st.cache_data(ttl=3)
 def cargar_registros():
   try:
     ws = get_ws("Registros", tuple(REGISTROS_HEADERS))
-    df = _sheet_a_df(ws, REGISTROS_HEADERS, {"cantidad_cajas", "factor", "unidades"})
+    df = _sheet_a_df(
+        ws, REGISTROS_HEADERS, {"cantidad_cajas", "factor", "unidades"}
+    )
     return df.iloc[::-1].reset_index(drop=True) if not df.empty else df
   except Exception:
     return pd.DataFrame(columns=REGISTROS_HEADERS)
@@ -236,24 +242,37 @@ def reiniciar_registros():
   st.cache_data.clear()
 
 
-def calcular_avance(pedido_df: pd.DataFrame, registros_df: pd.DataFrame) -> pd.DataFrame:
+def calcular_avance(
+    pedido_df: pd.DataFrame, registros_df: pd.DataFrame
+) -> pd.DataFrame:
   if pedido_df.empty:
     return pd.DataFrame()
   if registros_df.empty:
-    acumulado = pd.DataFrame(columns=["codigo", "unidades_entregadas", "cajas_entregadas"])
+    acumulado = pd.DataFrame(
+        columns=["codigo", "unidades_entregadas", "cajas_entregadas"]
+    )
   else:
     acumulado = (
         registros_df.groupby("codigo")
-        .agg(unidades_entregadas=("unidades", "sum"), cajas_entregadas=("cantidad_cajas", "sum"))
+        .agg(
+            unidades_entregadas=("unidades", "sum"),
+            cajas_entregadas=("cantidad_cajas", "sum"),
+        )
         .reset_index()
     )
   df = pedido_df.merge(acumulado, on="codigo", how="left")
   df["unidades_entregadas"] = df["unidades_entregadas"].fillna(0)
   df["cajas_entregadas"] = df["cajas_entregadas"].fillna(0)
   req_seguro = df["requerimiento"].replace(0, pd.NA)
-  df["pct_avance"] = ((df["unidades_entregadas"] / req_seguro * 100).fillna(0)).astype(float)
+  df["pct_avance"] = (
+      (df["unidades_entregadas"] / req_seguro * 100).fillna(0)
+  ).astype(float)
   df["estado"] = df["pct_avance"].apply(
-      lambda p: "⛔ Sin iniciar" if p <= 0 else ("🟡 Parcial" if p < 100 else "✅ Completo")
+      lambda p: (
+          "⛔ Sin iniciar"
+          if p <= 0
+          else ("🟡 Parcial" if p < 100 else "✅ Completo")
+      )
   )
   return df.sort_values("pct_avance")
 
@@ -274,67 +293,139 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
   df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
   df_factor.columns = [str(c).strip().upper() for c in df_factor.columns]
 
-  # Cruzamos la hoja data con Receta
-  df_merged = pd.merge(df_data, df_receta, on="CÓDIGO", how="inner", suffixes=("_PEDIDO", "_RECETA"))
+  # Extraer el requerimiento real directamente de la hoja data
+  col_req_data = next(
+      (c for c in df_data.columns if "REQUERIMIENTO" in c), "REQUERIMIENTO"
+  )
+  col_cod_data = next(
+      (c for c in df_data.columns if "CÓDIGO" in c or "CODIGO" in c), "CÓDIGO"
+  )
 
-  col_req = next((c for c in df_merged.columns if "REQUERIMIENTO" in c), None)
-  col_cant = next((c for c in df_merged.columns if "CANTIDAD" in c), None)
+  df_data_limpio = df_data[[col_cod_data, col_req_data]].copy()
+  df_data_limpio.columns = ["CÓDIGO_PROD", "REQ_REAL"]
+  df_data_limpio["REQ_REAL"] = (
+      pd.to_numeric(df_data_limpio["REQ_REAL"], errors="coerce").fillna(0)
+  )
 
-  val_req = pd.to_numeric(df_merged[col_req], errors="coerce").fillna(0) if col_req else 2160
-  val_cant = pd.to_numeric(df_merged[col_cant], errors="coerce").fillna(0) if col_cant else 1
+  # Cruzar la receta con el requerimiento real de data
+  col_cod_receta = next(
+      (c for c in df_receta.columns if "CÓDIGO" in c or "CODIGO" in c), "CÓDIGO"
+  )
+  col_comp_receta = next(
+      (c for c in df_receta.columns if "COMPONENTE" in c), "COD COMPONENTE"
+  )
 
-  # Aquí calculamos directo con el requerimiento del pedido (ej. 2160)
-  df_merged["REQ_COMPONENTE"] = val_cant * val_req
+  df_merged = pd.merge(
+      df_receta,
+      df_data_limpio,
+      left_on=col_cod_receta,
+      right_on="CÓDIGO_PROD",
+      how="inner",
+  )
 
-  col_comp_receta = next((c for c in df_merged.columns if "COMPONENTE" in c), "COD COMPONENTE")
-  df_m = df_merged[df_merged[col_comp_receta].astype(str).str.upper().str.startswith("M")].copy()
+  # Asignar directamente el requerimiento de data sin multiplicar por cantidades unitarias de receta
+  df_merged["REQ_COMPONENTE"] = df_merged["REQ_REAL"]
 
-  col_cod_f = next((c for c in df_factor.columns if "COD" in c), df_factor.columns[0])
-  col_fac_f = next((c for c in df_factor.columns if "FACTOR" in c), df_factor.columns[-1])
-  df_factor = df_factor.rename(columns={col_cod_f: "CÓDIGO_LIMA", col_fac_f: "FACTOR_VALOR"})
+  # Filtrar componentes que empiezan con M
+  df_m = df_merged[
+      df_merged[col_comp_receta].astype(str).str.upper().str.startswith("M")
+  ].copy()
 
-  df_final = pd.merge(df_m, df_factor, left_on=col_comp_receta, right_on="CÓDIGO_LIMA", how="left")
-  df_final["FACTOR_LIMA"] = pd.to_numeric(df_final["FACTOR_VALOR"], errors="coerce").fillna(1.0)
-  df_final["FACTOR_LIMA"] = df_final["FACTOR_LIMA"].apply(lambda x: x if x > 0 else 1.0)
+  # Cruzar con factor-lima
+  col_cod_f = next(
+      (c for c in df_factor.columns if "COD" in c), df_factor.columns[0]
+  )
+  col_fac_f = next(
+      (c for c in df_factor.columns if "FACTOR" in c), df_factor.columns[-1]
+  )
+  df_factor = df_factor.rename(
+      columns={col_cod_f: "CÓDIGO_LIMA", col_fac_f: "FACTOR_VALOR"}
+  )
 
-  col_desc_comp = next((c for c in df_final.columns if "DESCRIPCIÓN" in c or "PRODUCTO" in c), col_comp_receta)
+  df_final = pd.merge(
+      df_m,
+      df_factor,
+      left_on=col_comp_receta,
+      right_on="CÓDIGO_LIMA",
+      how="left",
+  )
+  df_final["FACTOR_LIMA"] = (
+      pd.to_numeric(df_final["FACTOR_VALOR"], errors="coerce").fillna(1.0)
+  )
+  df_final["FACTOR_LIMA"] = df_final["FACTOR_LIMA"].apply(
+      lambda x: x if x > 0 else 1.0
+  )
+
+  col_desc_comp = next(
+      (
+          c
+          for c in df_final.columns
+          if "DESCRIPCIÓN" in c or "PRODUCTO" in c or c == "COMPONENTE"
+      ),
+      col_comp_receta,
+  )
 
   df_grouped = (
-      df_final.groupby([col_comp_receta, col_desc_comp, "FACTOR_LIMA"], as_index=False)["REQ_COMPONENTE"]
+      df_final.groupby(
+          [col_comp_receta, col_desc_comp, "FACTOR_LIMA"], as_index=False
+      )["REQ_COMPONENTE"]
       .sum()
       .rename(columns={"REQ_COMPONENTE": "REQ_TOTAL"})
   )
 
   df_grouped["REQ_REDONDEADO"] = df_grouped.apply(
-      lambda row: math.ceil(row["REQ_TOTAL"] / row["FACTOR_LIMA"]) * row["FACTOR_LIMA"], axis=1
+      lambda row: math.ceil(row["REQ_TOTAL"] / row["FACTOR_LIMA"])
+      * row["FACTOR_LIMA"],
+      axis=1,
   )
 
-  return df_grouped[[col_comp_receta, col_desc_comp, "REQ_TOTAL", "FACTOR_LIMA", "REQ_REDONDEADO"]].rename(
-      columns={
-          col_comp_receta: "CÓDIGO",
-          col_desc_comp: "DESCRIPCIÓN",
-          "REQ_TOTAL": "REQUERIMIENTO NETO",
-          "FACTOR_LIMA": "FACTOR LIMA",
-          "REQ_REDONDEADO": "REQUERIMIENTO REDONDEADO",
-      }
-  ).sort_values("CÓDIGO").reset_index(drop=True)
+  return (
+      df_grouped[[
+          col_comp_receta,
+          col_desc_comp,
+          "REQ_TOTAL",
+          "FACTOR_LIMA",
+          "REQ_REDONDEADO",
+      ]]
+      .rename(
+          columns={
+              col_comp_receta: "CÓDIGO",
+              col_desc_comp: "DESCRIPCIÓN",
+              "REQ_TOTAL": "REQUERIMIENTO NETO",
+              "FACTOR_LIMA": "FACTOR LIMA",
+              "REQ_REDONDEADO": "REQUERIMIENTO REDONDEADO",
+          }
+      )
+      .sort_values("CÓDIGO")
+      .reset_index(drop=True)
+  )
 
 
 # --- INTERFAZ ---
 try:
   with st.sidebar:
     st.markdown("## 📦 Control de Empaque QR")
-    operario = st.text_input("👤 Operario", value=st.session_state.get("operario", ""))
+    operario = st.text_input(
+        "👤 Operario", value=st.session_state.get("operario", "")
+    )
     st.session_state["operario"] = operario
     st.markdown("---")
-    
-    archivo = st.file_uploader("Excel con hojas 'data', 'Receta' y 'factor-lima'", type=["xlsx"])
+
+    archivo = st.file_uploader(
+        "Excel con hojas 'data', 'Receta' y 'factor-lima'", type=["xlsx"]
+    )
     if archivo is not None:
       firma = f"{archivo.name}-{archivo.size}"
       if firma != st.session_state.get("ultimo_archivo_cargado"):
         xl_temp = pd.ExcelFile(archivo)
-        if {"data", "Receta", "factor-lima"}.issubset(set(xl_temp.sheet_names)):
-          guardar_pedido(xl_temp.parse("data"), xl_temp.parse("Receta"), xl_temp.parse("factor-lima"))
+        if {"data", "Receta", "factor-lima"}.issubset(
+            set(xl_temp.sheet_names)
+        ):
+          guardar_pedido(
+              xl_temp.parse("data"),
+              xl_temp.parse("Receta"),
+              xl_temp.parse("factor-lima"),
+          )
           st.session_state["ultimo_archivo_cargado"] = firma
           st.session_state["archivo_bytes_actual"] = archivo.getvalue()
           st.success("¡Pedido cargado con éxito!")
@@ -362,7 +453,12 @@ try:
 
   st.title("📦 Control de Empaque QR")
   tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-      "📷 Escanear", "📊 Avance", "🕒 Historial", "🏷️ Etiquetas", "⚙️ Factor M", "📤 Exportar"
+      "📷 Escanear",
+      "📊 Avance",
+      "🕒 Historial",
+      "🏷️ Etiquetas",
+      "⚙️ Factor M",
+      "📤 Exportar",
   ])
 
   with tab1:
@@ -379,8 +475,16 @@ try:
       else:
         prod = cat_row.iloc[0]["producto"]
         ped_row = pedido_df[pedido_df["codigo"] == codigo_actual]
-        factor = ped_row.iloc[0]["factor"] if not ped_row.empty else cat_row.iloc[0]["factor"]
-        umi = ped_row.iloc[0]["umi"] if not ped_row.empty else cat_row.iloc[0]["umr"]
+        factor = (
+            ped_row.iloc[0]["factor"]
+            if not ped_row.empty
+            else cat_row.iloc[0]["factor"]
+        )
+        umi = (
+            ped_row.iloc[0]["umi"]
+            if not ped_row.empty
+            else cat_row.iloc[0]["umr"]
+        )
 
         st.markdown(f"**Producto:** {prod} (`{codigo_actual}`)")
         cajas = st.number_input("Cajas", min_value=0.0, value=1.0, step=1.0)
@@ -388,7 +492,15 @@ try:
         st.caption(f"= {fmt_num(unidades)} {umi}")
 
         if st.button("✅ Registrar entrega", type="primary"):
-          registrar_escaneo(codigo_actual, prod, cajas, float(factor), unidades, umi, operario or "Operario")
+          registrar_escaneo(
+              codigo_actual,
+              prod,
+              cajas,
+              float(factor),
+              unidades,
+              umi,
+              operario or "Operario",
+          )
           st.success("¡Registrado!")
           st.rerun()
 
@@ -407,7 +519,10 @@ try:
   with tab5:
     st.markdown("### ⚙️ Requerimiento de Componentes (Factor M)")
     if "archivo_bytes_actual" in st.session_state:
-      df_fm = calcular_componentes_factor_m(pedido_df, archivo_subido=io.BytesIO(st.session_state["archivo_bytes_actual"]))
+      df_fm = calcular_componentes_factor_m(
+          pedido_df,
+          archivo_subido=io.BytesIO(st.session_state["archivo_bytes_actual"]),
+      )
       if not df_fm.empty:
         st.dataframe(df_fm, use_container_width=True, hide_index=True)
       else:
