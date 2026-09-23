@@ -12,8 +12,8 @@ import io
 import math
 import uuid
 
-import gspread
 from google.oauth2.service_account import Credentials
+import gspread
 from PIL import Image, ImageDraw, ImageFont
 import pandas as pd
 import plotly.graph_objects as go
@@ -200,7 +200,14 @@ def procesar_excel(file):
   receta_df = xl.parse("Receta")
   factor_lima_df = xl.parse("factor-lima")
 
-  req_data = {"CÓDIGO", "DESCRIPCIÓN", "UMI", "FACTOR", "REQUERIMIENTO", "FECHA PEDIDO"}
+  req_data = {
+      "CÓDIGO",
+      "DESCRIPCIÓN",
+      "UMI",
+      "FACTOR",
+      "REQUERIMIENTO",
+      "FECHA PEDIDO",
+  }
   req_receta = {"CÓDIGO", "PRODUCTO", "FACTOR", "UMR"}
   req_factor = {"CÓDIGO", "DESCRIPCIÓN", "FACTOR"}
 
@@ -235,9 +242,9 @@ def guardar_pedido(
   ].copy()
   d.columns = PEDIDO_HEADERS
   d["codigo"] = d["codigo"].astype(str).str.strip()
-  d["fecha_pedido"] = pd.to_datetime(d["fecha_pedido"], errors="coerce").dt.strftime(
-      "%Y-%m-%d"
-  )
+  d["fecha_pedido"] = pd.to_datetime(
+      d["fecha_pedido"], errors="coerce"
+  ).dt.strftime("%Y-%m-%d")
 
   c = receta_df.drop_duplicates(subset="CÓDIGO")[
       ["CÓDIGO", "PRODUCTO", "FACTOR", "UMR"]
@@ -260,7 +267,6 @@ def guardar_pedido(
       _rows_seguras(c, CATALOGO_HEADERS, {"factor"}), value_input_option="RAW"
   )
 
-  # Guardamos también factor-lima en gspread para persistencia si es necesario
   fl_headers = ["codigo", "descripcion", "factor"]
   ws_factor = get_ws("FactorLima", tuple(fl_headers))
   ws_factor.clear()
@@ -282,7 +288,9 @@ def cargar_pedido():
   ws_factor = get_ws("FactorLima", tuple(["codigo", "descripcion", "factor"]))
   pedido = _sheet_a_df(ws_pedido, PEDIDO_HEADERS, {"factor", "requerimiento"})
   catalogo = _sheet_a_df(ws_catalogo, CATALOGO_HEADERS, {"factor"})
-  factor_lima = _sheet_a_df(ws_factor, ["codigo", "descripcion", "factor"], {"factor"})
+  factor_lima = _sheet_a_df(
+      ws_factor, ["codigo", "descripcion", "factor"], {"factor"}
+  )
   return pedido, catalogo, factor_lima
 
 
@@ -382,19 +390,30 @@ def calcular_componentes_factor_m(
       df_receta = xl.parse("Receta")
       df_factor = xl.parse("factor-lima")
     else:
-      # Si ya está guardado en gspread, podemos usar los datos de la sesión actual
-      # O reconstructor directo si tenemos el archivo original.
       return pd.DataFrame()
   except Exception:
     return pd.DataFrame()
 
-  # Normalizar nombres de columnas por seguridad
   df_data.columns = [str(c).strip().upper() for c in df_data.columns]
   df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
   df_factor.columns = [str(c).strip().upper() for c in df_factor.columns]
 
-  # Cruce de data con receta
-  # En Receta: 'CÓDIGO' es el producto terminado, 'COD COMPONENTE' es el componente, 'CANTIDAD' es la proporción por unidad terminada
+  col_cod_f = next(
+      (
+          c
+          for c in df_factor.columns
+          if "COD" in c or c == "CÓDIGO" or c == "CODIGO"
+      ),
+      df_factor.columns[0],
+  )
+  col_fac_f = next(
+      (c for c in df_factor.columns if "FACTOR" in c), df_factor.columns[-1]
+  )
+
+  df_factor = df_factor.rename(
+      columns={col_cod_f: "CÓDIGO_LIMA", col_fac_f: "FACTOR_VALOR"}
+  )
+
   df_merged = pd.merge(
       df_data,
       df_receta,
@@ -403,39 +422,49 @@ def calcular_componentes_factor_m(
       suffixes=("_PEDIDO", "_RECETA"),
   )
 
-  # Requerimiento componente = Requerimiento del producto terminado * Cantidad en receta
   df_merged["REQ_COMPONENTE"] = (
       df_merged["REQUERIMIENTO"] * df_merged["CANTIDAD"]
   )
 
-  # Filtrar componentes que empiezan con 'M'
+  col_comp_receta = next(
+      (c for c in df_merged.columns if "COMPONENTE" in c), "COD COMPONENTE"
+  )
   df_m = df_merged[
-      df_merged["COD COMPONENTE"].astype(str).str.upper().str.startswith("M")
+      df_merged[col_comp_receta].astype(str).str.upper().str.startswith("M")
   ].copy()
 
-  # Cruce con factor-lima por código de componente
   df_final = pd.merge(
       df_m,
       df_factor,
-      left_on="COD COMPONENTE",
-      right_on="CÓDIGO",
+      left_on=col_comp_receta,
+      right_on="CÓDIGO_LIMA",
       how="left",
-      suffixes=("", "_LIMA"),
   )
 
-  # El factor de lima está en la columna FACTOR de factor-lima
-  df_final["FACTOR_LIMA"] = df_final["FACTOR_LIMA"].fillna(1)
+  if "FACTOR_VALOR" in df_final.columns:
+    df_final["FACTOR_LIMA"] = (
+        pd.to_numeric(df_final["FACTOR_VALOR"], errors="coerce").fillna(1)
+    )
+  else:
+    df_final["FACTOR_LIMA"] = 1.0
 
-  # Agrupar por componente
+  col_desc_comp = next(
+      (
+          c
+          for c in df_final.columns
+          if "DESCRIPCIÓN" in c or "PRODUCTO" in c or c == "COMPONENTE"
+      ),
+      col_comp_receta,
+  )
+
   df_grouped = (
       df_final.groupby(
-          ["COD COMPONENTE", "COMPONENTE", "FACTOR_LIMA"], as_index=False
+          [col_comp_receta, col_desc_comp, "FACTOR_LIMA"], as_index=False
       )["REQ_COMPONENTE"]
       .sum()
       .rename(columns={"REQ_COMPONENTE": "REQ_TOTAL"})
   )
 
-  # Aplicar redondeo hacia arriba al múltiplo del factor
   def redondear_factor(row):
     req = row["REQ_TOTAL"]
     factor = row["FACTOR_LIMA"]
@@ -446,15 +475,15 @@ def calcular_componentes_factor_m(
   df_grouped["REQ_REDONDEADO"] = df_grouped.apply(redondear_factor, axis=1)
 
   resultado = df_grouped[[
-      "COD COMPONENTE",
-      "COMPONENTE",
+      col_comp_receta,
+      col_desc_comp,
       "REQ_TOTAL",
       "FACTOR_LIMA",
       "REQ_REDONDEADO",
   ]].rename(
       columns={
-          "COD COMPONENTE": "CÓDIGO",
-          "COMPONENTE": "DESCRIPCIÓN",
+          col_comp_receta: "CÓDIGO",
+          col_desc_comp: "DESCRIPCIÓN",
           "REQ_TOTAL": "REQUERIMIENTO NETO",
           "FACTOR_LIMA": "FACTOR LIMA",
           "REQ_REDONDEADO": "REQUERIMIENTO REDONDEADO",
@@ -633,7 +662,8 @@ with tab_scan:
 
   if (
       codigo_leido
-      and codigo_leido.strip() != st.session_state.get("ultimo_escaneo_procesado")
+      and codigo_leido.strip()
+      != st.session_state.get("ultimo_escaneo_procesado")
   ):
     st.session_state["codigo_actual"] = codigo_leido.strip().upper()
   if buscar_manual and codigo_manual.strip():
@@ -683,7 +713,9 @@ with tab_scan:
             if not fila_av.empty
             else 0.0
         )
-        pct_actual = ya_entregado / requerimiento * 100 if requerimiento else 0
+        pct_actual = (
+            (ya_entregado / requerimiento * 100) if requerimiento else 0
+        )
         st.progress(
             min(pct_actual / 100, 1.0),
             text=(
@@ -703,7 +735,9 @@ with tab_scan:
       st.caption(f"= {fmt_num(unidades_calc)} {umi}")
 
       cb1, cb2 = st.columns(2)
-      if cb1.button("✅ Registrar entrega", type="primary", use_container_width=True):
+      if cb1.button(
+          "✅ Registrar entrega", type="primary", use_container_width=True
+      ):
         registrar_escaneo(
             codigo_actual,
             producto,
@@ -885,7 +919,7 @@ with tab_labels:
       )
 
 # ----------------------------------------------------------------
-# TAB: FACTOR M (NUEVO REQUERIMIENTO)
+# TAB: FACTOR M
 # ----------------------------------------------------------------
 with tab_factor_m:
   st.markdown("### ⚙️ Requerimiento de Componentes (Factor M)")
@@ -897,7 +931,8 @@ with tab_factor_m:
 
   if "archivo_bytes_actual" in st.session_state:
     df_factor_m = calcular_componentes_factor_m(
-        pedido_df, archivo_subido=io.BytesIO(st.session_state["archivo_bytes_actual"])
+        pedido_df,
+        archivo_subido=io.BytesIO(st.session_state["archivo_bytes_actual"]),
     )
     if not df_factor_m.empty:
       st.dataframe(df_factor_m, use_container_width=True, hide_index=True)
