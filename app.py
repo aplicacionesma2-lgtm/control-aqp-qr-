@@ -295,11 +295,10 @@ def reiniciar_registros():
 
 def cerrar_turno_y_archivar(operario_actual):
   """Congela registros actuales, guarda histórico de cierre y limpia los registros diarios"""
-  registros_ actuales = cargar_registros()
+  registros_actuales = cargar_registros()
   if registros_actuales.empty:
     return False, "No hay registros activos para cerrar."
 
-  # Guardar en hoja de Cierres
   ws_cierres = get_ws("HistorialCierres", tuple(HISTORIAL_CIERRES_HEADERS))
   id_cierre = uuid.uuid4().hex[:8]
   timestamp_cierre = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -317,7 +316,6 @@ def cerrar_turno_y_archivar(operario_actual):
       value_input_option="RAW",
   )
 
-  # Limpiar la hoja de registros diarios
   reiniciar_registros()
   return True, id_cierre
 
@@ -584,10 +582,10 @@ try:
 
     st.markdown("---")
     st.markdown("### 🗂️ Cierre de Turno / Auditoría")
-    if st.button("🔒 Cerrar Turno y Archivar Registros"):
+    if st.button("🔒 Cerrar Turno y Archivar"):
       exito, msg = cerrar_turno_y_archivar(operario)
       if exito:
-        st.success(f"Turno cerrado con éxito. ID Cierre: {msg}")
+        st.success(f"Turno cerrado. ID Cierre: {msg}")
         st.rerun()
       else:
         st.warning(msg)
