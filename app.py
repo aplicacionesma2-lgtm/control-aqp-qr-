@@ -318,15 +318,41 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
   col_cod_receta = next(
       (c for c in df_receta.columns if "CÓDIGO" in c or "CODIGO" in c), "CÓDIGO"
   )
-  col_comp_receta = next(
-      (c for c in df_receta.columns if "COMPONENTE" in c), "COMPONENTE"
+
+  # Buscar las columnas exactas COD COMPONENTE y COMPONENTE en la hoja Receta
+  col_cod_comp = next(
+      (
+          c
+          for c in df_receta.columns
+          if "COD" in c and ("COMPONENTE" in c or "COMP" in c)
+      ),
+      None,
   )
+  col_desc_comp = next(
+      (
+          c
+          for c in df_receta.columns
+          if c != col_cod_comp and "COMPONENTE" in c
+      ),
+      None,
+  )
+
+  if not col_cod_comp:
+    col_cod_comp = next(
+        (c for c in df_receta.columns if "COMPONENTE" in c),
+        df_receta.columns[1],
+    )
+  if not col_desc_comp:
+    col_desc_comp = col_cod_comp
 
   df_receta[col_cod_receta] = (
       df_receta[col_cod_receta].fillna("").astype(str).str.strip()
   )
-  df_receta[col_comp_receta] = (
-      df_receta[col_comp_receta].fillna("").astype(str).str.strip()
+  df_receta[col_cod_comp] = (
+      df_receta[col_cod_comp].fillna("").astype(str).str.strip()
+  )
+  df_receta[col_desc_comp] = (
+      df_receta[col_desc_comp].fillna("").astype(str).str.strip()
   )
 
   df_merged = pd.merge(
@@ -339,36 +365,17 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
 
   df_merged["REQ_COMPONENTE"] = df_merged["REQ_REAL"]
 
-  s_comp = (
-      df_merged[col_comp_receta]
-      .fillna("")
-      .astype(str)
-      .str.strip()
-  )
-
+  # Filtrar componentes que comiencen con 'M' en la columna COD COMPONENTE
+  s_cod = df_merged[col_cod_comp]
   df_m = df_merged[
-      s_comp.str.upper().str.startswith("M")
-      & (s_comp.str.upper() != "NAN")
-      & (s_comp != "")
+      s_cod.str.upper().str.startswith("M")
+      & (s_cod.str.upper() != "NAN")
+      & (s_cod != "")
   ].copy()
 
-  s_comp_m = (
-      df_m[col_comp_receta]
-      .fillna("")
-      .astype(str)
-      .str.strip()
-  )
-
-  split_res = s_comp_m.str.split(n=1, expand=True)
-  df_m["CÓDIGO_EXTRACTO"] = split_res[0].fillna("").astype(str).str.strip()
-
-  if 1 in split_res.columns:
-    df_m["DESCRIPCIÓN_COMP"] = split_res[1].fillna("").astype(str).str.strip()
-  else:
-    df_m["DESCRIPCIÓN_COMP"] = ""
-
-  df_m["DESCRIPCIÓN_COMP"] = df_m["DESCRIPCIÓN_COMP"].mask(
-      df_m["DESCRIPCIÓN_COMP"] == "", df_m["CÓDIGO_EXTRACTO"]
+  df_m["CÓDIGO_EXTRACTO"] = df_m[col_cod_comp]
+  df_m["DESCRIPCIÓN_COMP"] = df_m[col_desc_comp].mask(
+      df_m[col_desc_comp] == "", df_m["CÓDIGO_EXTRACTO"]
   )
 
   col_cod_f = next(
