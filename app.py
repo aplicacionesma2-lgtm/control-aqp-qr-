@@ -127,9 +127,11 @@ def _sheet_a_df(ws, columnas_esperadas: list, numericas: set) -> pd.DataFrame:
   df = pd.DataFrame(registros)
   if df.empty:
     return pd.DataFrame(columns=columnas_esperadas)
-  for col in numericas:
-    if col in df.columns:
+  for col in df.columns:
+    if col in numericas:
       df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+    else:
+      df[col] = df[col].astype(str).str.strip().replace("nan", "")
   return df
 
 
@@ -306,12 +308,23 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
   df_data_limpio["REQ_REAL"] = (
       pd.to_numeric(df_data_limpio["REQ_REAL"], errors="coerce").fillna(0)
   )
+  df_data_limpio["CÓDIGO_PROD"] = (
+      df_data_limpio["CÓDIGO_PROD"].fillna("").astype(str).str.strip()
+  )
 
   col_cod_receta = next(
       (c for c in df_receta.columns if "CÓDIGO" in c or "CODIGO" in c), "CÓDIGO"
   )
   col_comp_receta = next(
       (c for c in df_receta.columns if "COMPONENTE" in c), "COMPONENTE"
+  )
+
+  # Forzar conversión absoluta a string en columnas clave para prevenir errores de tipo float
+  df_receta[col_cod_receta] = (
+      df_receta[col_cod_receta].fillna("").astype(str).str.strip()
+  )
+  df_receta[col_comp_receta] = (
+      df_receta[col_comp_receta].fillna("").astype(str).str.strip()
   )
 
   df_merged = pd.merge(
@@ -324,20 +337,19 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
 
   df_merged["REQ_COMPONENTE"] = df_merged["REQ_REAL"]
 
-  # Eliminar nulos y convertir la columna COMPONENTE de forma segura a string
-  df_merged = df_merged.dropna(subset=[col_comp_receta]).copy()
-  s_comp = df_merged[col_comp_receta].astype(str).str.strip()
-
-  # Filtrar componentes que comiencen con 'M' (ignorando mayúsculas/minúsculas) y descartar 'NAN'
+  s_comp = df_merged[col_comp_receta]
   df_m = df_merged[
-      s_comp.str.upper().str.startswith("M") & (s_comp.str.upper() != "NAN")
+      s_comp.str.upper().str.startswith("M")
+      & (s_comp.str.upper() != "NAN")
+      & (s_comp != "")
   ].copy()
-  s_comp_m = df_m[col_comp_receta].astype(str).str.strip()
+  s_comp_m = df_m[col_comp_receta]
 
-  # Extraer correctamente el código (primera palabra) y la descripción (el resto del texto)
   df_m["CÓDIGO_EXTRACTO"] = s_comp_m.str.split(n=1).str[0].str.strip()
   df_m["DESCRIPCIÓN_COMP"] = s_comp_m.str.split(n=1).str[1].str.strip()
-  df_m["DESCRIPCIÓN_COMP"] = df_m["DESCRIPCIÓN_COMP"].fillna(df_m["CÓDIGO_EXTRACTO"])
+  df_m["DESCRIPCIÓN_COMP"] = df_m["DESCRIPCIÓN_COMP"].fillna(
+      df_m["CÓDIGO_EXTRACTO"]
+  )
 
   col_cod_f = next(
       (c for c in df_factor.columns if "COD" in c), df_factor.columns[0]
@@ -348,7 +360,9 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
   df_factor = df_factor.rename(
       columns={col_cod_f: "CÓDIGO_LIMA", col_fac_f: "FACTOR_VALOR"}
   )
-  df_factor["CÓDIGO_LIMA"] = df_factor["CÓDIGO_LIMA"].astype(str).str.strip()
+  df_factor["CÓDIGO_LIMA"] = (
+      df_factor["CÓDIGO_LIMA"].fillna("").astype(str).str.strip()
+  )
 
   df_final = pd.merge(
       df_m,
@@ -411,9 +425,15 @@ def generar_imagen_etiqueta(codigo, producto, cajas, unidades, umi, operario):
   prod_cortado = producto if len(producto) <= 40 else producto[:37] + "..."
   d.text((20, 125), f"PRODUCTO: {prod_cortado}", fill="black")
 
-  d.text((20, 165), f"CANTIDAD: {fmt_num(cajas)} Cajas ({fmt_num(unidades)} {umi})", fill="black")
+  d.text(
+      (20, 165),
+      f"CANTIDAD: {fmt_num(cajas)} Cajas ({fmt_num(unidades)} {umi})",
+      fill="black",
+  )
   d.text((20, 200), f"OPERARIO: {operario}", fill="gray")
-  d.text((20, 230), f"FECHA: {datetime.now().strftime('%Y-%m-%d %H:%M')}", fill="gray")
+  d.text(
+      (20, 230), f"FECHA: {datetime.now().strftime('%Y-%m-%d %H:%M')}", fill="gray"
+  )
 
   qr = qrcode.QRCode(box_size=4, border=1)
   qr.add_data(str(codigo))
@@ -541,7 +561,10 @@ try:
 
   with tab4:
     st.markdown("### 🏷️ Generador de Etiquetas QR")
-    st.markdown("Selecciona un producto del pedido o catálogo para generar su etiqueta de empaque.")
+    st.markdown(
+        "Selecciona un producto del pedido o catálogo para generar su etiqueta"
+        " de empaque."
+    )
 
     col_sel1, col_sel2 = st.columns([2, 1])
     with col_sel1:
@@ -563,14 +586,17 @@ try:
           else cat_row["factor"]
       )
       umi_val = (
-          ped_row.iloc[0]["umi"]
-          if not ped_row.empty
-          else cat_row["umr"]
+          ped_row.iloc[0]["umi"] if not ped_row.empty else cat_row["umr"]
       )
 
       col_val1, col_val2 = st.columns(2)
       with col_val1:
-        num_cajas = st.number_input("Cantidad de Cajas para Etiqueta", min_value=1.0, value=1.0, step=1.0)
+        num_cajas = st.number_input(
+            "Cantidad de Cajas para Etiqueta",
+            min_value=1.0,
+            value=1.0,
+            step=1.0,
+        )
       with col_val2:
         st.markdown(f"**Factor:** {factor_val} | **UMI:** {umi_val}")
 
@@ -579,13 +605,22 @@ try:
 
       if st.button("🖨️ Generar Imagen de Etiqueta", type="primary"):
         img_buffer = generar_imagen_etiqueta(
-            codigo_sel, prod_nombre, num_cajas, total_unidades, umi_val, operario or "Operario"
+            codigo_sel,
+            prod_nombre,
+            num_cajas,
+            total_unidades,
+            umi_val,
+            operario or "Operario",
         )
-        st.image(img_buffer, caption=f"Vista previa - Etiqueta {codigo_sel}", width=450)
+        st.image(
+            img_buffer, caption=f"Vista previa - Etiqueta {codigo_sel}", width=450
+        )
         st.download_button(
             label="⬇️ Descargar Etiqueta (PNG)",
             data=img_buffer,
-            file_name=f"etiqueta_{codigo_sel}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+            file_name=(
+                f"etiqueta_{codigo_sel}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            ),
             mime="image/png",
         )
 
@@ -598,7 +633,7 @@ try:
       )
       if not df_fm.empty:
         st.dataframe(df_fm, use_container_width=True, hide_index=True)
-        
+
         buffer_excel = io.BytesIO()
         with pd.ExcelWriter(buffer_excel, engine="openpyxl") as writer:
           df_fm.to_excel(writer, index=False, sheet_name="Factor M")
@@ -607,8 +642,13 @@ try:
         st.download_button(
             label="📥 Descargar Factor M a Excel",
             data=buffer_excel,
-            file_name=f"requerimiento_factor_m_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            file_name=(
+                "requerimiento_factor_m_"
+                f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            ),
+            mime=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
         )
       else:
         st.info("No hay componentes M o faltan columnas.")
