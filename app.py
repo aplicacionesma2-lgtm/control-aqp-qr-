@@ -672,7 +672,6 @@ try:
             else cat_row.iloc[0]["umr"]
         )
 
-        # Validación y Alerta Visual si ya está al 100% o cubierto
         avance_prod = avance_df[avance_df["codigo"] == codigo_actual]
         if not avance_prod.empty:
           p_av = float(avance_prod.iloc[0]["pct_avance"])
@@ -812,24 +811,45 @@ try:
     st.markdown("### 📤 Reporte Consolidado y Avance General")
     st.dataframe(avance_df, use_container_width=True, hide_index=True)
 
-    buffer_reporte = io.BytesIO()
-    with pd.ExcelWriter(buffer_reporte, engine="openpyxl") as writer:
-      avance_df.to_excel(writer, index=False, sheet_name="Avance de Produccion")
-      if not registros_df.empty:
-        registros_df.to_excel(writer, index=False, sheet_name="Detalle Registros")
-    buffer_reporte.seek(0)
+    col_ex1, col_ex2 = st.columns(2)
+    with col_ex1:
+      buffer_reporte = io.BytesIO()
+      with pd.ExcelWriter(buffer_reporte, engine="openpyxl") as writer:
+        avance_df.to_excel(writer, index=False, sheet_name="Avance de Produccion")
+        if not registros_df.empty:
+          registros_df.to_excel(writer, index=False, sheet_name="Detalle Registros")
+      buffer_reporte.seek(0)
 
-    st.download_button(
-        label="📥 Descargar Reporte Consolidado (Excel para Planta)",
-        data=buffer_reporte,
-        file_name=(
-            "reporte_consolidado_empaque_"
-            f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        ),
-        mime=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ),
-    )
+      st.download_button(
+          label="📥 Descargar Reporte en Excel",
+          data=buffer_reporte,
+          file_name=(
+              "reporte_consolidado_empaque_"
+              f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+          ),
+          mime=(
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          ),
+      )
+
+    with col_ex2:
+      st.markdown(
+          """
+          <div style="padding: 10px; border-radius: 8px; background-color: rgba(41, 128, 185, 0.1);">
+            <p style="margin:0; font-size: 14px;"><b>💡 Tip para el Jefe (PDF):</b> Haz clic en el botón de abajo para abrir la ventana de impresión, luego selecciona <b>"Guardar como PDF"</b> en la destinación de tu impresora.</p>
+          </div>
+          """,
+          unsafe_allow_html=True
+      )
+      if st.button("🖨️ Vista para Imprimir / Guardar en PDF"):
+        st.markdown(
+            """
+            <script>
+              window.print();
+            </script>
+            """,
+            unsafe_allow_html=True
+        )
 
 except Exception as e:
   st.error(f"Se ha producido un error al ejecutar la aplicación: {e}")
