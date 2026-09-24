@@ -314,7 +314,6 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       (c for c in df_receta.columns if "COMPONENTE" in c), "COD COMPONENTE"
   )
 
-  # Buscar la columna que representa la descripción del componente específicamente
   cols_desc_comp = [
       c
       for c in df_receta.columns
@@ -326,7 +325,6 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
   if cols_desc_comp:
     col_desc_comp = cols_desc_comp[0]
   else:
-    # Buscar alternativas que no sean el producto principal
     candidatos = [
         c
         for c in df_receta.columns
@@ -411,18 +409,13 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
 
 
 def generar_imagen_etiqueta(codigo, producto, cajas, unidades, umi, operario):
-  # Crear imagen de etiqueta limpia (Ancho: 600px, Alto: 400px)
   img = Image.new("RGB", (600, 400), color="white")
   d = ImageDraw.Draw(img)
 
-  # Dibujar rectángulo de encabezado
   d.rectangle([0, 0, 600, 70], fill=C_PRIMARY_DARK)
   d.text((20, 20), "MARÍA ALMENARA - CONTROL QR", fill="white")
 
-  # Información de producto
   d.text((20, 90), f"CÓDIGO: {codigo}", fill="black")
-  
-  # Recortar texto largo de producto si es necesario
   prod_cortado = producto if len(producto) <= 40 else producto[:37] + "..."
   d.text((20, 125), f"PRODUCTO: {prod_cortado}", fill="black")
 
@@ -430,16 +423,12 @@ def generar_imagen_etiqueta(codigo, producto, cajas, unidades, umi, operario):
   d.text((20, 200), f"OPERARIO: {operario}", fill="gray")
   d.text((20, 230), f"FECHA: {datetime.now().strftime('%Y-%m-%d %H:%M')}", fill="gray")
 
-  # Generar Código QR físico en la esquina inferior derecha
   qr = qrcode.QRCode(box_size=4, border=1)
   qr.add_data(str(codigo))
   qr.make(fit=True)
   qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-  
-  # Pegar QR en la imagen
   img.paste(qr_img, (420, 210))
 
-  # Guardar en buffer de bytes para descarga
   buf = io.BytesIO()
   img.save(buf, format="PNG")
   buf.seek(0)
@@ -564,7 +553,6 @@ try:
 
     col_sel1, col_sel2 = st.columns([2, 1])
     with col_sel1:
-      # Opciones para escoger producto
       opciones_prod = [
           f"{row['codigo']} - {row['producto']}"
           for _, row in catalogo_df.iterrows()
@@ -618,6 +606,19 @@ try:
       )
       if not df_fm.empty:
         st.dataframe(df_fm, use_container_width=True, hide_index=True)
+        
+        # --- NUEVO: Botón de descarga a Excel ---
+        buffer_excel = io.BytesIO()
+        with pd.ExcelWriter(buffer_excel, engine="xlsxwriter") as writer:
+          df_fm.to_excel(writer, index=False, sheet_name="Factor M")
+        buffer_excel.seek(0)
+
+        st.download_button(
+            label="📥 Descargar Factor M a Excel",
+            data=buffer_excel,
+            file_name=f"requerimiento_factor_m_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
       else:
         st.info("No hay componentes M o faltan columnas.")
     else:
