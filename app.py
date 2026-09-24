@@ -607,9 +607,9 @@ try:
       if not df_fm.empty:
         st.dataframe(df_fm, use_container_width=True, hide_index=True)
         
-        # --- NUEVO: Botón de descarga a Excel ---
+        # --- CORREGIDO: Usando openpyxl en lugar de xlsxwriter ---
         buffer_excel = io.BytesIO()
-        with pd.ExcelWriter(buffer_excel, engine="xlsxwriter") as writer:
+        with pd.ExcelWriter(buffer_excel, engine="openpyxl") as writer:
           df_fm.to_excel(writer, index=False, sheet_name="Factor M")
         buffer_excel.seek(0)
 
