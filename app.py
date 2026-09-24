@@ -367,8 +367,8 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
   else:
     df_m["DESCRIPCIÓN_COMP"] = ""
 
-  df_m["DESCRIPCIÓN_COMP"] = df_m["DESCRIPCIÓN_COMP"].replace(
-      "", df_m["CÓDIGO_EXTRACTO"]
+  df_m["DESCRIPCIÓN_COMP"] = df_m["DESCRIPCIÓN_COMP"].mask(
+      df_m["DESCRIPCIÓN_COMP"] == "", df_m["CÓDIGO_EXTRACTO"]
   )
 
   col_cod_f = next(
