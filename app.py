@@ -15,7 +15,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from streamlit_qrcode_scanner import qrcode_scanner
-import qrcode  # Necesario para generar los QR visuales en etiquetas
+import qrcode
 
 st.set_page_config(
     page_title="Control de Empaque QR — María Almenara",
@@ -314,25 +314,26 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       (c for c in df_receta.columns if "COMPONENTE" in c), "COD COMPONENTE"
   )
 
-  cols_desc_comp = [
-      c
-      for c in df_receta.columns
-      if (
-          "COMPONENTE" in c
-          and ("DESC" in c or "PROD" in c or "DESCRIPCIÓN" in c)
-      )
-  ]
-  if cols_desc_comp:
-    col_desc_comp = cols_desc_comp[0]
-  else:
-    candidatos = [
-        c
-        for c in df_receta.columns
-        if c not in [col_cod_receta, col_comp_receta, "PRODUCTO", "DESCRIPCIÓN"]
-    ]
-    col_desc_comp = (
-        candidatos[0] if candidatos else df_receta.columns[1]
-    )
+  # --- CORRECCIÓN: Búsqueda robusta de la descripción de texto del componente ---
+  col_desc_comp = None
+  for c in df_receta.columns:
+    c_upper = str(c).upper()
+    if (
+        ("DESC" in c_upper or "NOMBRE" in c_upper or "TEXTO" in c_upper)
+        and c_upper != col_comp_receta
+        and c_upper != col_cod_receta
+    ):
+      col_desc_comp = c
+      break
+
+  if not col_desc_comp:
+    for c in df_receta.columns:
+      if c not in [col_cod_receta, col_comp_receta] and df_receta[c].dtype == object:
+        col_desc_comp = c
+        break
+
+  if not col_desc_comp:
+    col_desc_comp = df_receta.columns[1]
 
   df_merged = pd.merge(
       df_receta,
@@ -607,7 +608,6 @@ try:
       if not df_fm.empty:
         st.dataframe(df_fm, use_container_width=True, hide_index=True)
         
-        # --- CORREGIDO: Usando openpyxl en lugar de xlsxwriter ---
         buffer_excel = io.BytesIO()
         with pd.ExcelWriter(buffer_excel, engine="openpyxl") as writer:
           df_fm.to_excel(writer, index=False, sheet_name="Factor M")
