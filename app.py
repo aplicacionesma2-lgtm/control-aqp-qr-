@@ -324,15 +324,19 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
 
   df_merged["REQ_COMPONENTE"] = df_merged["REQ_REAL"]
 
-  # Filtrar componentes que comiencen con 'M' en la columna COMPONENTE
-  df_m = df_merged[
-      df_merged[col_comp_receta].astype(str).str.upper().str.startswith("M")
-  ].copy()
+  # Eliminar nulos y convertir la columna COMPONENTE de forma segura a string
+  df_merged = df_merged.dropna(subset=[col_comp_receta]).copy()
+  s_comp = df_merged[col_comp_receta].astype(str).str.strip()
 
-  # --- CORRECCIÓN: Separar correctamente el Código y la Descripción del texto de COMPONENTE ---
-  s_comp = df_m[col_comp_receta].astype(str).str.strip()
-  df_m["CÓDIGO_EXTRACTO"] = s_comp.str.split(n=1).str[0].str.strip()
-  df_m["DESCRIPCIÓN_COMP"] = s_comp.str.split(n=1).str[1].str.strip()
+  # Filtrar componentes que comiencen con 'M' (ignorando mayúsculas/minúsculas) y descartar 'NAN'
+  df_m = df_merged[
+      s_comp.str.upper().str.startswith("M") & (s_comp.str.upper() != "NAN")
+  ].copy()
+  s_comp_m = df_m[col_comp_receta].astype(str).str.strip()
+
+  # Extraer correctamente el código (primera palabra) y la descripción (el resto del texto)
+  df_m["CÓDIGO_EXTRACTO"] = s_comp_m.str.split(n=1).str[0].str.strip()
+  df_m["DESCRIPCIÓN_COMP"] = s_comp_m.str.split(n=1).str[1].str.strip()
   df_m["DESCRIPCIÓN_COMP"] = df_m["DESCRIPCIÓN_COMP"].fillna(df_m["CÓDIGO_EXTRACTO"])
 
   col_cod_f = next(
