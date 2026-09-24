@@ -12,6 +12,10 @@ from google.oauth2.service_account import Credentials
 import gspread
 from PIL import Image, ImageDraw, ImageFont
 import pandas as pd
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter, landscape
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import plotly.graph_objects as go
 import streamlit as st
 from streamlit_qrcode_scanner import qrcode_scanner
@@ -294,7 +298,6 @@ def reiniciar_registros():
 
 
 def respaldo_diario_turno(operario_actual):
-  """Guarda foto de auditoría en la nube SIN borrar los registros (acumulado semanal intacto)"""
   registros_actuales = cargar_registros()
   if registros_actuales.empty:
     return False, "No hay registros activos para respaldar."
@@ -319,7 +322,6 @@ def respaldo_diario_turno(operario_actual):
 
 
 def cerrar_pedido_semanal(operario_actual):
-  """Archiva el cierre final y LIMPIA los registros para empezar un nuevo pedido semanal"""
   registros_actuales = cargar_registros()
   if registros_actuales.empty:
     return False, "No hay registros para cerrar."
@@ -343,6 +345,82 @@ def cerrar_pedido_semanal(operario_actual):
 
   reiniciar_registros()
   return True, id_cierre
+
+
+def generar_pdf_reporte(avance_df: pd.DataFrame) -> io.BytesIO:
+  buffer = io.BytesIO()
+  doc = SimpleDocTemplate(
+      buffer,
+      pagesize=landscape(letter),
+      rightMargin=30,
+      leftMargin=30,
+      topMargin=30,
+      bottomMargin=30,
+  )
+  elements = []
+  styles = getSampleStyleSheet()
+
+  title_style = ParagraphStyle(
+      'TitleStyle',
+      parent=styles['Heading1'],
+      fontSize=18,
+      textColor=colors.HexColor('#1B4F72'),
+      spaceAfter=6,
+      alignment=1,
+  )
+  subtitle_style = ParagraphStyle(
+      'SubTitleStyle',
+      parent=styles['Normal'],
+      fontSize=10,
+      textColor=colors.HexColor('#566573'),
+      spaceAfter=15,
+      alignment=1,
+  )
+
+  elements.append(Paragraph('MARÍA ALMENARA - REPORTE DE AVANCE DE EMPAQUE', title_style))
+  elements.append(Paragraph(f'Generado el: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}', subtitle_style))
+
+  if avance_df.empty:
+    elements.append(Paragraph('No hay datos de avance registrados.', styles['Normal']))
+  else:
+    # Seleccionar columnas principales para el PDF
+    cols_pdf = ['codigo', 'descripcion', 'requerimiento', 'unidades_entregadas', 'pct_avance', 'estado']
+    df_table = avance_df[[c for c in cols_pdf if c in avance_df.columns]].copy()
+    
+    # Renombrar columnas para la cabecera
+    df_table.columns = ['Código', 'Descripción', 'Requerimiento', 'Entregado', '% Avance', 'Estado']
+
+    data = [list(df_table.columns)]
+    for _, row in df_table.iterrows():
+      data.append([
+          str(row['Código']),
+          str(row['Descripción']),
+          fmt_num(row['Requerimiento']),
+          fmt_num(row['Entregado']),
+          f"{float(row['% Avance']):.1f}%",
+          str(row['Estado'])
+      ])
+
+    t = Table(data, colWidths=[80, 260, 90, 90, 80, 100])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1B4F72')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F4F6F7')),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D4E6F1')),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 9),
+        ('TOPPADDING', (0, 1), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+    ]))
+    elements.append(t)
+
+  doc.build(elements)
+  buffer.seek(0)
+  return buffer
 
 
 def calcular_avance(
@@ -833,23 +911,16 @@ try:
       )
 
     with col_ex2:
-      st.markdown(
-          """
-          <div style="padding: 10px; border-radius: 8px; background-color: rgba(41, 128, 185, 0.1);">
-            <p style="margin:0; font-size: 14px;"><b>💡 Tip para el Jefe (PDF):</b> Haz clic en el botón de abajo para abrir la ventana de impresión, luego selecciona <b>"Guardar como PDF"</b> en la destinación de tu impresora.</p>
-          </div>
-          """,
-          unsafe_allow_html=True
+      pdf_buffer = generar_pdf_reporte(avance_df)
+      st.download_button(
+          label="📄 Descargar Reporte en PDF (Para el Jefe)",
+          data=pdf_buffer,
+          file_name=(
+              "reporte_empaque_maria_almenara_"
+              f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+          ),
+          mime="application/pdf",
       )
-      if st.button("🖨️ Vista para Imprimir / Guardar en PDF"):
-        st.markdown(
-            """
-            <script>
-              window.print();
-            </script>
-            """,
-            unsafe_allow_html=True
-        )
 
 except Exception as e:
   st.error(f"Se ha producido un error al ejecutar la aplicación: {e}")
