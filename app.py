@@ -24,32 +24,58 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# --- NUEVA PALETA DE COLORES (Tonos Azules Corporativos) ---
-C_PRIMARY = "#1B4F72"       # Azul corporativo principal
-C_PRIMARY_DARK = "#154360"  # Azul marino oscuro para barra lateral
-C_LIGHT = "#EBF5FB"         # Fondo claro azulado
-C_ACCENT = "#2980B9"      # Azul acento / secundario
-C_BG = "#F4F6F7"            # Fondo general suave
-C_OK = "#27AE60"            # Verde éxito
-C_WARN = "#F39C12"          # Naranja advertencia
-C_BAD = "#C0392B"           # Rojo error
+# --- GESTIÓN DE TEMA (CLARO / OSCURO) ---
+if "tema" not in st.session_state:
+  st.session_state["tema"] = "Claro"
+
+with st.sidebar:
+  st.markdown("### 🎨 Apariencia")
+  st.session_state["tema"] = st.radio(
+      "Seleccionar Modo", ["Claro", "Oscuro"], index=0 if st.session_state["tema"] == "Claro" else 1, horizontal=True
+  )
+  st.markdown("---")
+
+# Paletas de colores adaptativas
+if st.session_state["tema"] == "Oscuro":
+  C_BG = "#1A252F"
+  C_SIDEBAR = "#11181E"
+  C_CARD_BG = "#212F3D"
+  C_TEXT = "#F2F4F4"
+  C_PRIMARY = "#2980B9"
+  C_PRIMARY_DARK = "#1A5276"
+  C_ACCENT = "#5499C7"
+  CSS_THEME_EXTRA = "color: #F2F4F4 !important;"
+else:
+  C_BG = "#F4F6F7"
+  C_SIDEBAR = "#154360"
+  C_CARD_BG = "#FFFFFF"
+  C_TEXT = "#2C3E50"
+  C_PRIMARY = "#1B4F72"
+  C_PRIMARY_DARK = "#154360"
+  C_ACCENT = "#2980B9"
+  CSS_THEME_EXTRA = ""
 
 st.markdown(
     f"""
     <style>
-    .stApp {{ background-color: {C_BG}; }}
-    section[data-testid="stSidebar"] {{ background-color: {C_PRIMARY_DARK}; }}
+    .stApp {{ background-color: {C_BG}; {CSS_THEME_EXTRA} }}
+    section[data-testid="stSidebar"] {{ background-color: {C_SIDEBAR}; }}
     section[data-testid="stSidebar"] * {{ color: #F2F2F2 !important; }}
     div[data-testid="stMetric"] {{
-        background-color: white; border: 1px solid #D4E6F1;
-        border-left: 6px solid {C_PRIMARY}; border-radius: 10px; padding: 12px 16px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        background-color: {C_CARD_BG}; border: 1px solid #D4E6F1;
+        border-left: 6px solid {C_PRIMARY}; border-radius: 12px; padding: 14px 18px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }}
+    /* Botones grandes y ergonómicos para tablets táctiles */
     .stButton>button {{
         background-color: {C_PRIMARY};
         color: white;
-        border-radius: 6px;
+        border-radius: 10px;
         border: none;
+        padding: 10px 20px;
+        font-weight: bold;
+        min-height: 48px;
+        width: 100%;
     }}
     .stButton>button:hover {{
         background-color: {C_ACCENT};
@@ -94,6 +120,13 @@ REGISTROS_HEADERS = [
     "umi",
     "operario",
     "timestamp",
+]
+HISTORIAL_CIERRES_HEADERS = [
+    "id_cierre",
+    "timestamp_cierre",
+    "operario_cierre",
+    "total_registros",
+    "total_unidades",
 ]
 
 
@@ -258,6 +291,35 @@ def reiniciar_registros():
   ws.clear()
   ws.append_row(REGISTROS_HEADERS, value_input_option="RAW")
   st.cache_data.clear()
+
+
+def cerrar_turno_y_archivar(operario_actual):
+  """Congela registros actuales, guarda histórico de cierre y limpia los registros diarios"""
+  registros_ actuales = cargar_registros()
+  if registros_actuales.empty:
+    return False, "No hay registros activos para cerrar."
+
+  # Guardar en hoja de Cierres
+  ws_cierres = get_ws("HistorialCierres", tuple(HISTORIAL_CIERRES_HEADERS))
+  id_cierre = uuid.uuid4().hex[:8]
+  timestamp_cierre = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+  total_regs = len(registros_actuales)
+  total_unids = float(registros_actuales["unidades"].sum())
+
+  ws_cierres.append_row(
+      [
+          id_cierre,
+          timestamp_cierre,
+          str(operario_actual or "Supervisor"),
+          total_regs,
+          total_unids,
+      ],
+      value_input_option="RAW",
+  )
+
+  # Limpiar la hoja de registros diarios
+  reiniciar_registros()
+  return True, id_cierre
 
 
 def calcular_avance(
@@ -520,6 +582,16 @@ try:
     if not pedido_df.empty:
       st.caption(f"✅ {len(pedido_df)} productos cargados en sistema.")
 
+    st.markdown("---")
+    st.markdown("### 🗂️ Cierre de Turno / Auditoría")
+    if st.button("🔒 Cerrar Turno y Archivar Registros"):
+      exito, msg = cerrar_turno_y_archivar(operario)
+      if exito:
+        st.success(f"Turno cerrado con éxito. ID Cierre: {msg}")
+        st.rerun()
+      else:
+        st.warning(msg)
+
     if st.button("🔄 Limpiar Caché / Forzar Recarga"):
       st.cache_data.clear()
       st.cache_resource.clear()
@@ -568,6 +640,19 @@ try:
             if not ped_row.empty
             else cat_row.iloc[0]["umr"]
         )
+
+        # Validación y Alerta Visual si ya está al 100% o cubierto
+        avance_prod = avance_df[avance_df["codigo"] == codigo_actual]
+        if not avance_prod.empty:
+          p_av = float(avance_prod.iloc[0]["pct_avance"])
+          u_ent = float(avance_prod.iloc[0]["unidades_entregadas"])
+          req_tot = float(avance_prod.iloc[0]["requerimiento"])
+          if p_av >= 100:
+            st.warning(
+                f"⚠️ **¡ALERTA! Este producto ya está cubierto al {p_av:.1f}%"
+                f" ({fmt_num(u_ent)} / {fmt_num(req_tot)} {umi}).** Evita"
+                " sobreproducción innecesaria."
+            )
 
         st.markdown(f"**Producto:** {prod} (`{codigo_actual}`)")
         cajas = st.number_input("Cajas", min_value=0.0, value=1.0, step=1.0)
@@ -693,7 +778,27 @@ try:
       st.info("Carga el Excel del pedido en la barra lateral.")
 
   with tab6:
+    st.markdown("### 📤 Reporte Consolidado y Avance General")
     st.dataframe(avance_df, use_container_width=True, hide_index=True)
+
+    buffer_reporte = io.BytesIO()
+    with pd.ExcelWriter(buffer_reporte, engine="openpyxl") as writer:
+      avance_df.to_excel(writer, index=False, sheet_name="Avance de Produccion")
+      if not registros_df.empty:
+        registros_df.to_excel(writer, index=False, sheet_name="Detalle Registros")
+    buffer_reporte.seek(0)
+
+    st.download_button(
+        label="📥 Descargar Reporte Consolidado (Excel para Planta)",
+        data=buffer_reporte,
+        file_name=(
+            "reporte_consolidado_empaque_"
+            f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        ),
+        mime=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+    )
 
 except Exception as e:
   st.error(f"Se ha producido un error al ejecutar la aplicación: {e}")
