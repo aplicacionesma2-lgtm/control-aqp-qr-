@@ -24,14 +24,15 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-C_PRIMARY = "#0F5C55"
-C_PRIMARY_DARK = "#0A3F3A"
-C_LIGHT = "#EAF5F3"
-C_ACCENT = "#D98E73"
-C_BG = "#FFFBF7"
-C_OK = "#1F9D55"
-C_WARN = "#F5A623"
-C_BAD = "#E24C4C"
+# --- NUEVA PALETA DE COLORES (Tonos Azules Corporativos) ---
+C_PRIMARY = "#1B4F72"       # Azul corporativo principal
+C_PRIMARY_DARK = "#154360"  # Azul marino oscuro para barra lateral
+C_LIGHT = "#EBF5FB"         # Fondo claro azulado
+C_ACCENT = "#2980B9"      # Azul acento / secundario
+C_BG = "#F4F6F7"            # Fondo general suave
+C_OK = "#27AE60"            # Verde éxito
+C_WARN = "#F39C12"          # Naranja advertencia
+C_BAD = "#C0392B"           # Rojo error
 
 st.markdown(
     f"""
@@ -40,8 +41,19 @@ st.markdown(
     section[data-testid="stSidebar"] {{ background-color: {C_PRIMARY_DARK}; }}
     section[data-testid="stSidebar"] * {{ color: #F2F2F2 !important; }}
     div[data-testid="stMetric"] {{
-        background-color: white; border: 1px solid #E2E2E2;
+        background-color: white; border: 1px solid #D4E6F1;
         border-left: 6px solid {C_PRIMARY}; border-radius: 10px; padding: 12px 16px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }}
+    .stButton>button {{
+        background-color: {C_PRIMARY};
+        color: white;
+        border-radius: 6px;
+        border: none;
+    }}
+    .stButton>button:hover {{
+        background-color: {C_ACCENT};
+        color: white;
     }}
     </style>
     """,
@@ -319,7 +331,6 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       (c for c in df_receta.columns if "CÓDIGO" in c or "CODIGO" in c), "CÓDIGO"
   )
 
-  # Buscar las columnas exactas COD COMPONENTE y COMPONENTE en la hoja Receta
   col_cod_comp = next(
       (
           c
@@ -365,7 +376,6 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
 
   df_merged["REQ_COMPONENTE"] = df_merged["REQ_REAL"]
 
-  # Filtrar componentes que comiencen con 'M' en la columna COD COMPONENTE
   s_cod = df_merged[col_cod_comp]
   df_m = df_merged[
       s_cod.str.upper().str.startswith("M")
