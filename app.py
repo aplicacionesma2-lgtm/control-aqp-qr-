@@ -641,7 +641,7 @@ try:
       "📊 Avance",
       "🕒 Historial",
       "🏷️ Etiquetas",
-      "⚙️ Factor M",
+      "⚙️ ST 14-72",
       "📤 Exportar",
   ])
 
