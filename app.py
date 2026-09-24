@@ -291,10 +291,17 @@ def eliminar_registro(reg_id: str):
   st.cache_data.clear()
 
 
-def reiniciar_registros():
+def actualizar_registro(reg_id: str, nuevas_cajas: float, nuevo_factor: float, operario):
   ws = get_ws("Registros", tuple(REGISTROS_HEADERS))
-  ws.clear()
-  ws.append_row(REGISTROS_HEADERS, value_input_option="RAW")
+  celda = ws.find(str(reg_id), in_column=1)
+  if celda:
+    fila_num = celda.row
+    # Las columnas son: id(1), codigo(2), producto(3), cantidad_cajas(4), factor(5), unidades(6), umi(7), operario(8), timestamp(9)
+    nuevas_unidades = nuevas_cajas * nuevo_factor
+    ws.update_cell(fila_num, 4, float(nuevas_cajas))
+    ws.update_cell(fila_num, 6, float(nuevas_unidades))
+    ws.update_cell(fila_num, 8, str(operario))
+    ws.update_cell(fila_num, 9, ahora_lima().strftime("%Y-%m-%d %H:%M:%S"))
   st.cache_data.clear()
 
 
@@ -642,7 +649,6 @@ try:
 
   st.title("📦 Control de Empaque QR")
   
-  # 5 Pestañas definitivas (sin Exportar)
   tab1, tab2, tab3, tab4, tab5 = st.tabs([
       "📷 Escanear",
       "📊 Avance",
@@ -709,7 +715,6 @@ try:
   with tab2:
     st.markdown("### 📊 Avance General del Pedido")
     
-    # Indicador monstruoso basado en cantidad de productos completados (pct_avance >= 100)
     total_productos = len(avance_df)
     if total_productos > 0:
       productos_completados = len(avance_df[avance_df["pct_avance"] >= 100])
@@ -750,7 +755,7 @@ try:
     st.dataframe(avance_df, use_container_width=True, hide_index=True)
 
   with tab3:
-    st.markdown("### 🕒 Historial de Registros y Filtros")
+    st.markdown("### 🕒 Historial de Registros, Filtros y Edición")
     
     if registros_df.empty:
       st.info("No hay registros aún.")
@@ -773,6 +778,34 @@ try:
 
       st.markdown(f"Mostrando **{len(df_filtrado)}** de **{len(registros_df)}** registros totales.")
       st.dataframe(df_filtrado, use_container_width=True, hide_index=True)
+
+      st.markdown("---")
+      st.markdown("### 🛠️ Editar o Eliminar Registro")
+      
+      ids_disponibles = list(registros_df["id"].astype(str))
+      id_a_gestionar = st.selectbox("Selecciona el ID del registro a modificar", [""] + ids_disponibles)
+
+      if id_a_gestionar:
+        reg_row = registros_df[registros_df["id"].astype(str) == id_a_gestionar].iloc[0]
+        st.info(f"Editando registro: **{reg_row['codigo']} - {reg_row['producto']}** (Operario: {reg_row['operario']})")
+
+        col_ed1, col_ed2 = st.columns(2)
+        with col_ed1:
+          nuevas_cajas = st.number_input("Nueva cantidad de Cajas", min_value=0.0, value=float(reg_row["cantidad_cajas"]), step=1.0)
+        with col_ed2:
+          st.markdown(f"Factor actual: **{reg_row['factor']}** | UMI: **{reg_row['umi']}**")
+
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+          if st.button("💾 Guardar Cambios"):
+            actualizar_registro(id_a_gestionar, nuevas_cajas, float(reg_row["factor"]), operario or reg_row["operario"])
+            st.success("¡Registro actualizado con éxito!")
+            st.rerun()
+        with col_btn2:
+          if st.button("🗑️ Eliminar Registro", type="secondary"):
+            eliminar_registro(id_a_gestionar)
+            st.success("¡Registro eliminado!")
+            st.rerun()
 
   with tab4:
     st.markdown("### 🏷️ Generador de Etiquetas QR Múltiples")
