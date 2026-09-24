@@ -790,7 +790,7 @@ try:
         buffer_excel.seek(0)
 
         st.download_button(
-            label="📥 Descargar Factor M a Excel",
+            label="📥 Descargar 72-14 a Excel",
             data=buffer_excel,
             file_name=(
                 "requerimiento_factor_m_"
