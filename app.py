@@ -336,7 +336,6 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
 
   df_merged["REQ_COMPONENTE"] = df_merged["REQ_REAL"]
 
-  # Blindaje total: forzar conversión a string directamente sobre la serie antes de usar .str
   s_comp = (
       df_merged[col_comp_receta]
       .fillna("")
@@ -357,11 +356,16 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       .str.strip()
   )
 
-  df_m["CÓDIGO_EXTRACTO"] = s_comp_m.str.split(n=1).str[0].str.strip()
-  df_m["DESCRIPCIÓN_COMP"] = s_comp_m.str.split(n=1).str[1].str.strip()
-  df_m["DESCRIPCIÓN_COMP"] = df_m["DESCRIPCIÓN_COMP"].fillna(
-      df_m["CÓDIGO_EXTRACTO"]
-  )
+  # CORRECCIÓN DEFINITIVA: Usar expand=True para evitar errores de índice o NaNs flotantes
+  split_res = s_comp_m.str.split(n=1, expand=True)
+  df_m["CÓDIGO_EXTRACTO"] = split_res[0].fillna("").astype(str).str.strip()
+  
+  if 1 in split_res.columns:
+    df_m["DESCRIPCIÓN_COMP"] = split_res[1].fillna("").astype(str).str.strip()
+  else:
+    df_m["DESCRIPCIÓN_COMP"] = ""
+    
+  df_m["DESCRIPCIÓN_COMP"] = df_m["DESCRIPCIÓN_COMP"].replace("", df_m["CÓDIGO_EXTRACTO"])
 
   col_cod_f = next(
       (c for c in df_factor.columns if "COD" in c), df_factor.columns[0]
