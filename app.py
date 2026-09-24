@@ -12,6 +12,7 @@ from google.oauth2.service_account import Credentials
 import gspread
 from PIL import Image, ImageDraw, ImageFont
 import pandas as pd
+import pytz
 import plotly.graph_objects as go
 import streamlit as st
 from streamlit_qrcode_scanner import qrcode_scanner
@@ -23,6 +24,12 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Zona horaria oficial para Lima, Perú
+TZ_LIMA = pytz.timezone("America/Lima")
+
+def ahora_lima():
+  return datetime.now(TZ_LIMA)
 
 # --- GESTIÓN DE TEMA (CLARO / OSCURO) ---
 if "tema" not in st.session_state:
@@ -66,7 +73,6 @@ st.markdown(
         border-left: 6px solid {C_PRIMARY}; border-radius: 12px; padding: 14px 18px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }}
-    /* Botones grandes y ergonómicos para tablets táctiles */
     .stButton>button {{
         background-color: {C_PRIMARY};
         color: white;
@@ -272,7 +278,7 @@ def registrar_escaneo(codigo, producto, cajas, factor, unidades, umi, operario):
       float(unidades),
       str(umi),
       str(operario),
-      datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+      ahora_lima().strftime("%Y-%m-%d %H:%M:%S"),
   ]
   ws.append_row(fila, value_input_option="RAW")
   st.cache_data.clear()
@@ -300,7 +306,7 @@ def respaldo_diario_turno(operario_actual):
 
   ws_cierres = get_ws("HistorialCierres", tuple(HISTORIAL_CIERRES_HEADERS))
   id_cierre = uuid.uuid4().hex[:8]
-  timestamp_cierre = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+  timestamp_cierre = ahora_lima().strftime("%Y-%m-%d %H:%M:%S")
   total_regs = len(registros_actuales)
   total_unids = float(registros_actuales["unidades"].sum())
 
@@ -324,7 +330,7 @@ def cerrar_pedido_semanal(operario_actual):
 
   ws_cierres = get_ws("HistorialCierres", tuple(HISTORIAL_CIERRES_HEADERS))
   id_cierre = uuid.uuid4().hex[:8]
-  timestamp_cierre = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+  timestamp_cierre = ahora_lima().strftime("%Y-%m-%d %H:%M:%S")
   total_regs = len(registros_actuales)
   total_unids = float(registros_actuales["unidades"].sum())
 
@@ -552,7 +558,7 @@ def generar_imagen_etiqueta(codigo, producto, cajas, unidades, umi, operario):
   )
   d.text((20, 200), f"OPERARIO: {operario}", fill="gray")
   d.text(
-      (20, 230), f"FECHA: {datetime.now().strftime('%Y-%m-%d %H:%M')}", fill="gray"
+      (20, 230), f"FECHA: {ahora_lima().strftime('%Y-%m-%d %H:%M')}", fill="gray"
   )
 
   qr = qrcode.QRCode(box_size=4, border=1)
@@ -636,13 +642,14 @@ try:
   avance_df = calcular_avance(pedido_df, registros_df)
 
   st.title("📦 Control de Empaque QR")
-  tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+  
+  # 5 Pestañas actualizadas (sin Exportar)
+  tab1, tab2, tab3, tab4, tab5 = st.tabs([
       "📷 Escanear",
       "📊 Avance",
       "🕒 Historial",
       "🏷️ Etiquetas",
-      "⚙️ ST 14-72",
-      "📤 Exportar",
+      "⚙️ Factor M",
   ])
 
   with tab1:
@@ -701,78 +708,130 @@ try:
           st.rerun()
 
   with tab2:
+    st.markdown("### 📊 Avance General del Pedido")
+    
+    # Cálculo del indicador monstruoso basado en PRODUCTOS COMPLETADOS (pct_avance >= 100)
+    total_productos = len(avance_df)
+    if total_productos > 0:
+      productos_completados = len(avance_df[avance_df["pct_avance"] >= 100])
+      pct_global_productos = (productos_completados / total_productos) * 100
+    else:
+      pct_global_productos = 0.0
+      productos_completados = 0
+
+    col_ind1, col_ind2 = st.columns([3, 1])
+    with col_ind1:
+      st.metric(
+          label="🚀 AVANCE GLOBAL DE PRODUCTOS COMPLETADOS",
+          value=f"{pct_global_productos:.1f}%",
+          delta=f"{productos_completados} de {total_productos} productos al 100%"
+      )
+    with col_ind2:
+      st.markdown("<br>", unsafe_allow_html=True)
+      buffer_reporte = io.BytesIO()
+      with pd.ExcelWriter(buffer_reporte, engine="openpyxl") as writer:
+        avance_df.to_excel(writer, index=False, sheet_name="Avance de Produccion")
+        if not registros_df.empty:
+          registros_df.to_excel(writer, index=False, sheet_name="Detalle Registros")
+      buffer_reporte.seek(0)
+
+      st.download_button(
+          label="📥 Descargar Reporte",
+          data=buffer_reporte,
+          file_name=(
+              "reporte_consolidado_empaque_"
+              f"{ahora_lima().strftime('%Y%m%d_%H%M%S')}.xlsx"
+          ),
+          mime=(
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          ),
+      )
+
+    st.markdown("---")
     st.dataframe(avance_df, use_container_width=True, hide_index=True)
 
   with tab3:
+    st.markdown("### 🕒 Historial de Registros y Filtros")
+    
     if registros_df.empty:
       st.info("No hay registros aún.")
     else:
-      st.dataframe(registros_df, use_container_width=True, hide_index=True)
+      # Filtros arriba de la tabla
+      f_col1, f_col2, f_col3 = st.columns(3)
+      with f_col1:
+        filtro_codigo = st.text_input("🔍 Filtrar por Código", "").strip().upper()
+      with f_col2:
+        filtro_producto = st.text_input("🔍 Filtrar por Producto", "").strip().upper()
+      with f_col3:
+        filtro_fecha = st.text_input("📅 Filtrar por Fecha (YYYY-MM-DD)", "").strip()
+
+      df_filtrado = registros_df.copy()
+      if filtro_codigo:
+        df_filtrado = df_filtrado[df_filtrado["codigo"].str.upper().str.contains(filtro_codigo)]
+      if filtro_producto:
+        df_filtrado = df_filtrado[df_filtrado["producto"].str.upper().str.contains(filtro_producto)]
+      if filtro_fecha:
+        df_filtrado = df_filtrado[df_filtrado["timestamp"].str.contains(filtro_fecha)]
+
+      st.markdown(f"Mostrando **{len(df_filtrado)}** de **{len(registros_df)}** registros totales.")
+      st.dataframe(df_filtrado, use_container_width=True, hide_index=True)
 
   with tab4:
-    st.markdown("### 🏷️ Generador de Etiquetas QR")
-    st.markdown(
-        "Selecciona un producto del pedido o catálogo para generar su etiqueta"
-        " de empaque."
-    )
+    st.markdown("### 🏷️ Generador de Etiquetas QR Múltiples")
+    st.markdown("Selecciona uno o varios productos para generar y descargar sus etiquetas en lote.")
 
-    col_sel1, col_sel2 = st.columns([2, 1])
-    with col_sel1:
-      opciones_prod = [
-          f"{row['codigo']} - {row['producto']}"
-          for _, row in catalogo_df.iterrows()
-      ]
-      prod_seleccionado = st.selectbox("Elegir Producto", opciones_prod)
+    opciones_prod = [
+        f"{row['codigo']} - {row['producto']}"
+        for _, row in catalogo_df.iterrows()
+    ]
+    productos_seleccionados = st.multiselect("Elegir Productos", opciones_prod)
 
-    if prod_seleccionado:
-      codigo_sel = prod_seleccionado.split(" - ")[0].strip()
-      cat_row = catalogo_df[catalogo_df["codigo"] == codigo_sel].iloc[0]
-      ped_row = pedido_df[pedido_df["codigo"] == codigo_sel]
-
-      prod_nombre = cat_row["producto"]
-      factor_val = (
-          ped_row.iloc[0]["factor"]
-          if not ped_row.empty
-          else cat_row["factor"]
-      )
-      umi_val = (
-          ped_row.iloc[0]["umi"] if not ped_row.empty else cat_row["umr"]
+    if productos_seleccionados:
+      num_cajas_lote = st.number_input(
+          "Cantidad de Cajas por Defecto para el Lote seleccionado",
+          min_value=1.0,
+          value=1.0,
+          step=1.0,
       )
 
-      col_val1, col_val2 = st.columns(2)
-      with col_val1:
-        num_cajas = st.number_input(
-            "Cantidad de Cajas para Etiqueta",
-            min_value=1.0,
-            value=1.0,
-            step=1.0,
-        )
-      with col_val2:
-        st.markdown(f"**Factor:** {factor_val} | **UMI:** {umi_val}")
+      if st.button("🖨️ Generar Lote de Etiquetas (PNG)", type="primary"):
+        for item_str in productos_seleccionados:
+          codigo_sel = item_str.split(" - ")[0].strip()
+          cat_row = catalogo_df[catalogo_df["codigo"] == codigo_sel].iloc[0]
+          ped_row = pedido_df[pedido_df["codigo"] == codigo_sel]
 
-      total_unidades = num_cajas * float(factor_val)
-      st.info(f"Total calculado: **{fmt_num(total_unidades)} {umi_val}**")
+          prod_nombre = cat_row["producto"]
+          factor_val = (
+              ped_row.iloc[0]["factor"]
+              if not ped_row.empty
+              else cat_row["factor"]
+          )
+          umi_val = (
+              ped_row.iloc[0]["umi"] if not ped_row.empty else cat_row["umr"]
+          )
+          total_unidades = num_cajas_lote * float(factor_val)
 
-      if st.button("🖨️ Generar Imagen de Etiqueta", type="primary"):
-        img_buffer = generar_imagen_etiqueta(
-            codigo_sel,
-            prod_nombre,
-            num_cajas,
-            total_unidades,
-            umi_val,
-            operario or "Operario",
-        )
-        st.image(
-            img_buffer, caption=f"Vista previa - Etiqueta {codigo_sel}", width=450
-        )
-        st.download_button(
-            label="⬇️ Descargar Etiqueta (PNG)",
-            data=img_buffer,
-            file_name=(
-                f"etiqueta_{codigo_sel}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            ),
-            mime="image/png",
-        )
+          img_buffer = generar_imagen_etiqueta(
+              codigo_sel,
+              prod_nombre,
+              num_cajas_lote,
+              total_unidades,
+              umi_val,
+              operario or "Operario",
+          )
+          st.image(
+              img_buffer, caption=f"Etiqueta - {codigo_sel}: {prod_nombre}", width=400
+          )
+          st.download_button(
+              label=f"⬇️ Descargar Etiqueta [{codigo_sel}]",
+              data=img_buffer,
+              file_name=(
+                  f"etiqueta_{codigo_sel}_{ahora_lima().strftime('%Y%m%d_%H%M%S')}.png"
+              ),
+              mime="image/png",
+              key=f"dl_{codigo_sel}_{uuid.uuid4().hex[:4]}"
+          )
+          st.markdown("---")
 
   with tab5:
     st.markdown("### ⚙️ Requerimiento de Componentes (Factor M)")
@@ -790,11 +849,11 @@ try:
         buffer_excel.seek(0)
 
         st.download_button(
-            label="📥 Descargar 72-14 a Excel",
+            label="📥 Descargar Factor M a Excel",
             data=buffer_excel,
             file_name=(
                 "requerimiento_factor_m_"
-                f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                f"{ahora_lima().strftime('%Y%m%d_%H%M%S')}.xlsx"
             ),
             mime=(
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -804,29 +863,6 @@ try:
         st.info("No hay componentes M o faltan columnas.")
     else:
       st.info("Carga el Excel del pedido en la barra lateral.")
-
-  with tab6:
-    st.markdown("### 📤 Reporte Consolidado y Avance General")
-    st.dataframe(avance_df, use_container_width=True, hide_index=True)
-
-    buffer_reporte = io.BytesIO()
-    with pd.ExcelWriter(buffer_reporte, engine="openpyxl") as writer:
-      avance_df.to_excel(writer, index=False, sheet_name="Avance de Produccion")
-      if not registros_df.empty:
-        registros_df.to_excel(writer, index=False, sheet_name="Detalle Registros")
-    buffer_reporte.seek(0)
-
-    st.download_button(
-        label="📥 Descargar Reporte Consolidado",
-        data=buffer_reporte,
-        file_name=(
-            "reporte_consolidado_empaque_"
-            f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        ),
-        mime=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ),
-    )
 
 except Exception as e:
   st.error(f"Se ha producido un error al ejecutar la aplicación: {e}")
