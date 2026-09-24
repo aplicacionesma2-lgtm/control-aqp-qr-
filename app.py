@@ -296,7 +296,6 @@ def actualizar_registro(reg_id: str, nuevas_cajas: float, nuevo_factor: float, o
   celda = ws.find(str(reg_id), in_column=1)
   if celda:
     fila_num = celda.row
-    # Las columnas son: id(1), codigo(2), producto(3), cantidad_cajas(4), factor(5), unidades(6), umi(7), operario(8), timestamp(9)
     nuevas_unidades = nuevas_cajas * nuevo_factor
     ws.update_cell(fila_num, 4, float(nuevas_cajas))
     ws.update_cell(fila_num, 6, float(nuevas_unidades))
@@ -777,34 +776,46 @@ try:
         df_filtrado = df_filtrado[df_filtrado["timestamp"].str.contains(filtro_fecha)]
 
       st.markdown(f"Mostrando **{len(df_filtrado)}** de **{len(registros_df)}** registros totales.")
-      st.dataframe(df_filtrado, use_container_width=True, hide_index=True)
 
-      st.markdown("---")
-      st.markdown("### 🛠️ Editar o Eliminar Registro")
-      
-      ids_disponibles = list(registros_df["id"].astype(str))
-      id_a_gestionar = st.selectbox("Selecciona el ID del registro a modificar", [""] + ids_disponibles)
+      # Tabla Interactiva con selección por Casilla (Checkbox) para eliminar o editar
+      df_editable = df_filtrado.copy()
+      df_editable.insert(0, "Seleccionar", False)
 
-      if id_a_gestionar:
-        reg_row = registros_df[registros_df["id"].astype(str) == id_a_gestionar].iloc[0]
-        st.info(f"Editando registro: **{reg_row['codigo']} - {reg_row['producto']}** (Operario: {reg_row['operario']})")
+      edited_df = st.data_editor(
+          df_editable,
+          use_container_width=True,
+          hide_index=True,
+          disabled=[col for col in df_editable.columns if col != "Seleccionar"]
+      )
 
-        col_ed1, col_ed2 = st.columns(2)
-        with col_ed1:
-          nuevas_cajas = st.number_input("Nueva cantidad de Cajas", min_value=0.0, value=float(reg_row["cantidad_cajas"]), step=1.0)
-        with col_ed2:
-          st.markdown(f"Factor actual: **{reg_row['factor']}** | UMI: **{reg_row['umi']}**")
+      # Identificar registros seleccionados
+      seleccionados = edited_df[edited_df["Seleccionar"] == True]
 
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-          if st.button("💾 Guardar Cambios"):
-            actualizar_registro(id_a_gestionar, nuevas_cajas, float(reg_row["factor"]), operario or reg_row["operario"])
-            st.success("¡Registro actualizado con éxito!")
+      if not seleccionados.empty:
+        st.markdown("---")
+        st.markdown(f"🛠️ **Acciones para los {len(seleccionados)} registros seleccionados:**")
+        
+        reg_id_activo = seleccionados.iloc[0]["id"]
+        prod_activo = seleccionados.iloc[0]["producto"]
+        cajas_actuales = float(seleccionados.iloc[0]["cantidad_cajas"])
+        factor_activo = float(seleccionados.iloc[0]["factor"])
+
+        col_act1, col_act2, col_act3 = st.columns([2, 1, 1])
+        with col_act1:
+          st.info(f"Editando: **{prod_activo}**")
+          nueva_caja_val = st.number_input("Nueva cantidad de Cajas", min_value=0.0, value=cajas_actuales, step=1.0, key="edit_cajas_val")
+        with col_act2:
+          st.markdown("<br>", unsafe_allow_html=True)
+          if st.button("💾 Guardar Edición"):
+            actualizar_registro(reg_id_activo, nueva_caja_val, factor_activo, operario or "Operario")
+            st.success("¡Registro actualizado!")
             st.rerun()
-        with col_btn2:
-          if st.button("🗑️ Eliminar Registro", type="secondary"):
-            eliminar_registro(id_a_gestionar)
-            st.success("¡Registro eliminado!")
+        with col_act3:
+          st.markdown("<br>", unsafe_allow_html=True)
+          if st.button("🗑️ Eliminar Seleccionados", type="primary"):
+            for _, r in seleccionados.iterrows():
+              eliminar_registro(r["id"])
+            st.success("¡Registros eliminados con éxito!")
             st.rerun()
 
   with tab4:
