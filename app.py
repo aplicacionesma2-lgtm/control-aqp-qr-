@@ -307,12 +307,32 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       pd.to_numeric(df_data_limpio["REQ_REAL"], errors="coerce").fillna(0)
   )
 
-  # Cruzar la receta con el requerimiento real de data
+  # Identificar columnas clave en Receta
   col_cod_receta = next(
       (c for c in df_receta.columns if "CÓDIGO" in c or "CODIGO" in c), "CÓDIGO"
   )
   col_comp_receta = next(
       (c for c in df_receta.columns if "COMPONENTE" in c), "COD COMPONENTE"
+  )
+
+  # Identificar la descripción del componente (evitando la descripción del producto padre)
+  # Buscamos columnas que tengan DESCRIPCIÓN o PRODUCTO pero que NO sean la primera del producto padre
+  cols_desc = [
+      c
+      for c in df_receta.columns
+      if ("DESCRIPCIÓN" in c or "PRODUCTO" in c) and c != "PRODUCTO"
+  ]
+  col_desc_comp = (
+      cols_desc[0]
+      if cols_desc
+      else next(
+          (
+              c
+              for c in df_receta.columns
+              if "DESCRIPCIÓN" in c or "PRODUCTO" in c
+          ),
+          col_comp_receta,
+      )
   )
 
   df_merged = pd.merge(
@@ -323,7 +343,7 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       how="inner",
   )
 
-  # Asignar directamente el requerimiento de data sin multiplicar por cantidades unitarias de receta
+  # Asignar directamente el requerimiento de data
   df_merged["REQ_COMPONENTE"] = df_merged["REQ_REAL"]
 
   # Filtrar componentes que empiezan con M
@@ -354,15 +374,6 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
   )
   df_final["FACTOR_LIMA"] = df_final["FACTOR_LIMA"].apply(
       lambda x: x if x > 0 else 1.0
-  )
-
-  col_desc_comp = next(
-      (
-          c
-          for c in df_final.columns
-          if "DESCRIPCIÓN" in c or "PRODUCTO" in c or c == "COMPONENTE"
-      ),
-      col_comp_receta,
   )
 
   df_grouped = (
