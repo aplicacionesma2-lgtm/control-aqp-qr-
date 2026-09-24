@@ -132,7 +132,9 @@ def _sheet_a_df(ws, columnas_esperadas: list, numericas: set) -> pd.DataFrame:
       df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
     else:
       df[col] = df[col].astype(str).str.strip()
-      df[col] = df[col].mask(df[col].str.lower() == "nan", "")
+      df[col] = df[col].mask(
+          df[col].str.lower().isin(["nan", "none", "nat"]), ""
+      )
   return df
 
 
@@ -349,7 +351,7 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       & (s_comp.str.upper() != "NAN")
       & (s_comp != "")
   ].copy()
-  
+
   s_comp_m = (
       df_m[col_comp_receta]
       .fillna("")
@@ -359,13 +361,15 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
 
   split_res = s_comp_m.str.split(n=1, expand=True)
   df_m["CÓDIGO_EXTRACTO"] = split_res[0].fillna("").astype(str).str.strip()
-  
+
   if 1 in split_res.columns:
     df_m["DESCRIPCIÓN_COMP"] = split_res[1].fillna("").astype(str).str.strip()
   else:
     df_m["DESCRIPCIÓN_COMP"] = ""
-    
-  df_m["DESCRIPCIÓN_COMP"] = df_m["DESCRIPCIÓN_COMP"].replace("", df_m["CÓDIGO_EXTRACTO"])
+
+  df_m["DESCRIPCIÓN_COMP"] = df_m["DESCRIPCIÓN_COMP"].replace(
+      "", df_m["CÓDIGO_EXTRACTO"]
+  )
 
   col_cod_f = next(
       (c for c in df_factor.columns if "COD" in c), df_factor.columns[0]
