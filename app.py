@@ -293,11 +293,11 @@ def reiniciar_registros():
   st.cache_data.clear()
 
 
-def cerrar_turno_y_archivar(operario_actual):
-  """Congela registros actuales, guarda histórico de cierre y limpia los registros diarios"""
+def respaldo_diario_turno(operario_actual):
+  """Guarda foto de auditoría en la nube SIN borrar los registros (acumulado semanal intacto)"""
   registros_actuales = cargar_registros()
   if registros_actuales.empty:
-    return False, "No hay registros activos para cerrar."
+    return False, "No hay registros activos para respaldar."
 
   ws_cierres = get_ws("HistorialCierres", tuple(HISTORIAL_CIERRES_HEADERS))
   id_cierre = uuid.uuid4().hex[:8]
@@ -307,7 +307,32 @@ def cerrar_turno_y_archivar(operario_actual):
 
   ws_cierres.append_row(
       [
-          id_cierre,
+          f"RESPALDO-{id_cierre}",
+          timestamp_cierre,
+          str(operario_actual or "Supervisor"),
+          total_regs,
+          total_unids,
+      ],
+      value_input_option="RAW",
+  )
+  return True, id_cierre
+
+
+def cerrar_pedido_semanal(operario_actual):
+  """Archiva el cierre final y LIMPIA los registros para empezar un nuevo pedido semanal"""
+  registros_actuales = cargar_registros()
+  if registros_actuales.empty:
+    return False, "No hay registros para cerrar."
+
+  ws_cierres = get_ws("HistorialCierres", tuple(HISTORIAL_CIERRES_HEADERS))
+  id_cierre = uuid.uuid4().hex[:8]
+  timestamp_cierre = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+  total_regs = len(registros_actuales)
+  total_unids = float(registros_actuales["unidades"].sum())
+
+  ws_cierres.append_row(
+      [
+          f"CIERRE_SEMANAL-{id_cierre}",
           timestamp_cierre,
           str(operario_actual or "Supervisor"),
           total_regs,
@@ -581,11 +606,19 @@ try:
       st.caption(f"✅ {len(pedido_df)} productos cargados en sistema.")
 
     st.markdown("---")
-    st.markdown("### 🗂️ Cierre de Turno / Auditoría")
-    if st.button("🔒 Cerrar Turno y Archivar"):
-      exito, msg = cerrar_turno_y_archivar(operario)
+    st.markdown("### 🗂️ Control de Turnos y Pedido")
+    
+    if st.button("📑 Registrar Respaldo Diario (Turno)"):
+      exito, msg = respaldo_diario_turno(operario)
       if exito:
-        st.success(f"Turno cerrado. ID Cierre: {msg}")
+        st.success(f"Respaldo diario guardado (ID: {msg}). El acumulado continúa.")
+      else:
+        st.warning(msg)
+
+    if st.button("🔒 Cerrar Pedido Semanal y Reiniciar"):
+      exito, msg = cerrar_pedido_semanal(operario)
+      if exito:
+        st.success(f"Pedido semanal cerrado y registros limpiados. ID: {msg}")
         st.rerun()
       else:
         st.warning(msg)
