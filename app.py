@@ -3,7 +3,7 @@ Control de Empaque QR — María Almenara
 ========================================
 """
 
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import io
 import math
 import uuid
@@ -12,7 +12,6 @@ from google.oauth2.service_account import Credentials
 import gspread
 from PIL import Image, ImageDraw, ImageFont
 import pandas as pd
-import pytz
 import plotly.graph_objects as go
 import streamlit as st
 from streamlit_qrcode_scanner import qrcode_scanner
@@ -25,8 +24,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Zona horaria oficial para Lima, Perú
-TZ_LIMA = pytz.timezone("America/Lima")
+# Zona horaria oficial para Lima, Perú (UTC-5)
+TZ_LIMA = timezone(timedelta(hours=-5))
 
 def ahora_lima():
   return datetime.now(TZ_LIMA)
@@ -643,7 +642,7 @@ try:
 
   st.title("📦 Control de Empaque QR")
   
-  # 5 Pestañas actualizadas (sin Exportar)
+  # 5 Pestañas definitivas (sin Exportar)
   tab1, tab2, tab3, tab4, tab5 = st.tabs([
       "📷 Escanear",
       "📊 Avance",
@@ -710,7 +709,7 @@ try:
   with tab2:
     st.markdown("### 📊 Avance General del Pedido")
     
-    # Cálculo del indicador monstruoso basado en PRODUCTOS COMPLETADOS (pct_avance >= 100)
+    # Indicador monstruoso basado en cantidad de productos completados (pct_avance >= 100)
     total_productos = len(avance_df)
     if total_productos > 0:
       productos_completados = len(avance_df[avance_df["pct_avance"] >= 100])
@@ -756,7 +755,6 @@ try:
     if registros_df.empty:
       st.info("No hay registros aún.")
     else:
-      # Filtros arriba de la tabla
       f_col1, f_col2, f_col3 = st.columns(3)
       with f_col1:
         filtro_codigo = st.text_input("🔍 Filtrar por Código", "").strip().upper()
