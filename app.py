@@ -15,6 +15,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from streamlit_qrcode_scanner import qrcode_scanner
+import qrcode  # Necesario para generar los QR visuales en etiquetas
 
 st.set_page_config(
     page_title="Control de Empaque QR — María Almenara",
@@ -293,7 +294,6 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
   df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
   df_factor.columns = [str(c).strip().upper() for c in df_factor.columns]
 
-  # Extraer el requerimiento real directamente de la hoja data
   col_req_data = next(
       (c for c in df_data.columns if "REQUERIMIENTO" in c), "REQUERIMIENTO"
   )
@@ -307,7 +307,6 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       pd.to_numeric(df_data_limpio["REQ_REAL"], errors="coerce").fillna(0)
   )
 
-  # Identificar columnas clave en Receta
   col_cod_receta = next(
       (c for c in df_receta.columns if "CÓDIGO" in c or "CODIGO" in c), "CÓDIGO"
   )
@@ -315,8 +314,7 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       (c for c in df_receta.columns if "COMPONENTE" in c), "COD COMPONENTE"
   )
 
-  # Buscar la columna de descripción específica del componente (que contenga COMPONENTE o DESC/PROD de componente)
-  # Evitamos tajantemente la columna de descripción del producto principal (ej. "PRODUCTO" o "DESCRIPCIÓN" a secas si es del padre)
+  # Buscar la columna que representa la descripción del componente específicamente
   cols_desc_comp = [
       c
       for c in df_receta.columns
@@ -324,21 +322,19 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
           "COMPONENTE" in c
           and ("DESC" in c or "PROD" in c or "DESCRIPCIÓN" in c)
       )
-      or (c != col_cod_receta and c != "PRODUCTO" and "DESCRIPCIÓN" in c)
   ]
   if cols_desc_comp:
     col_desc_comp = cols_desc_comp[0]
   else:
-    # Si no hay una específica, tomamos la columna que está exactamente al lado del código del componente si es posible, o la segunda columna de texto
-    idx_comp = (
-        list(df_receta.columns).index(col_comp_receta)
-        if col_comp_receta in df_receta.columns
-        else 0
+    # Buscar alternativas que no sean el producto principal
+    candidatos = [
+        c
+        for c in df_receta.columns
+        if c not in [col_cod_receta, col_comp_receta, "PRODUCTO", "DESCRIPCIÓN"]
+    ]
+    col_desc_comp = (
+        candidatos[0] if candidatos else df_receta.columns[1]
     )
-    if idx_comp + 1 < len(df_receta.columns):
-      col_desc_comp = df_receta.columns[idx_comp + 1]
-    else:
-      col_desc_comp = col_comp_receta
 
   df_merged = pd.merge(
       df_receta,
@@ -348,15 +344,12 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       how="inner",
   )
 
-  # Asignar directamente el requerimiento de data
   df_merged["REQ_COMPONENTE"] = df_merged["REQ_REAL"]
 
-  # Filtrar componentes que empiezan con M
   df_m = df_merged[
       df_merged[col_comp_receta].astype(str).str.upper().str.startswith("M")
   ].copy()
 
-  # Cruzar con factor-lima
   col_cod_f = next(
       (c for c in df_factor.columns if "COD" in c), df_factor.columns[0]
   )
@@ -415,6 +408,42 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       .sort_values("CÓDIGO")
       .reset_index(drop=True)
   )
+
+
+def generar_imagen_etiqueta(codigo, producto, cajas, unidades, umi, operario):
+  # Crear imagen de etiqueta limpia (Ancho: 600px, Alto: 400px)
+  img = Image.new("RGB", (600, 400), color="white")
+  d = ImageDraw.Draw(img)
+
+  # Dibujar rectángulo de encabezado
+  d.rectangle([0, 0, 600, 70], fill=C_PRIMARY_DARK)
+  d.text((20, 20), "MARÍA ALMENARA - CONTROL QR", fill="white")
+
+  # Información de producto
+  d.text((20, 90), f"CÓDIGO: {codigo}", fill="black")
+  
+  # Recortar texto largo de producto si es necesario
+  prod_cortado = producto if len(producto) <= 40 else producto[:37] + "..."
+  d.text((20, 125), f"PRODUCTO: {prod_cortado}", fill="black")
+
+  d.text((20, 165), f"CANTIDAD: {fmt_num(cajas)} Cajas ({fmt_num(unidades)} {umi})", fill="black")
+  d.text((20, 200), f"OPERARIO: {operario}", fill="gray")
+  d.text((20, 230), f"FECHA: {datetime.now().strftime('%Y-%m-%d %H:%M')}", fill="gray")
+
+  # Generar Código QR físico en la esquina inferior derecha
+  qr = qrcode.QRCode(box_size=4, border=1)
+  qr.add_data(str(codigo))
+  qr.make(fit=True)
+  qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+  
+  # Pegar QR en la imagen
+  img.paste(qr_img, (420, 210))
+
+  # Guardar en buffer de bytes para descarga
+  buf = io.BytesIO()
+  img.save(buf, format="PNG")
+  buf.seek(0)
+  return buf
 
 
 # --- INTERFAZ ---
@@ -530,7 +559,55 @@ try:
       st.dataframe(registros_df, use_container_width=True, hide_index=True)
 
   with tab4:
-    st.info("Generación de etiquetas disponible.")
+    st.markdown("### 🏷️ Generador de Etiquetas QR")
+    st.markdown("Selecciona un producto del pedido o catálogo para generar su etiqueta de empaque.")
+
+    col_sel1, col_sel2 = st.columns([2, 1])
+    with col_sel1:
+      # Opciones para escoger producto
+      opciones_prod = [
+          f"{row['codigo']} - {row['producto']}"
+          for _, row in catalogo_df.iterrows()
+      ]
+      prod_seleccionado = st.selectbox("Elegir Producto", opciones_prod)
+
+    if prod_seleccionado:
+      codigo_sel = prod_seleccionado.split(" - ")[0].strip()
+      cat_row = catalogo_df[catalogo_df["codigo"] == codigo_sel].iloc[0]
+      ped_row = pedido_df[pedido_df["codigo"] == codigo_sel]
+
+      prod_nombre = cat_row["producto"]
+      factor_val = (
+          ped_row.iloc[0]["factor"]
+          if not ped_row.empty
+          else cat_row["factor"]
+      )
+      umi_val = (
+          ped_row.iloc[0]["umi"]
+          if not ped_row.empty
+          else cat_row["umr"]
+      )
+
+      col_val1, col_val2 = st.columns(2)
+      with col_val1:
+        num_cajas = st.number_input("Cantidad de Cajas para Etiqueta", min_value=1.0, value=1.0, step=1.0)
+      with col_val2:
+        st.markdown(f"**Factor:** {factor_val} | **UMI:** {umi_val}")
+
+      total_unidades = num_cajas * float(factor_val)
+      st.info(f"Total calculado: **{fmt_num(total_unidades)} {umi_val}**")
+
+      if st.button("🖨️ Generar Imagen de Etiqueta", type="primary"):
+        img_buffer = generar_imagen_etiqueta(
+            codigo_sel, prod_nombre, num_cajas, total_unidades, umi_val, operario or "Operario"
+        )
+        st.image(img_buffer, caption=f"Vista previa - Etiqueta {codigo_sel}", width=450)
+        st.download_button(
+            label="⬇️ Descargar Etiqueta (PNG)",
+            data=img_buffer,
+            file_name=f"etiqueta_{codigo_sel}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+            mime="image/png",
+        )
 
   with tab5:
     st.markdown("### ⚙️ Requerimiento de Componentes (Factor M)")
