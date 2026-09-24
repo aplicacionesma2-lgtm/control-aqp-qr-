@@ -131,7 +131,8 @@ def _sheet_a_df(ws, columnas_esperadas: list, numericas: set) -> pd.DataFrame:
     if col in numericas:
       df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
     else:
-      df[col] = df[col].astype(str).str.strip().replace("nan", "")
+      df[col] = df[col].astype(str).str.strip()
+      df[col] = df[col].mask(df[col].str.lower() == "nan", "")
   return df
 
 
@@ -356,7 +357,6 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       .str.strip()
   )
 
-  # CORRECCIÓN DEFINITIVA: Usar expand=True para evitar errores de índice o NaNs flotantes
   split_res = s_comp_m.str.split(n=1, expand=True)
   df_m["CÓDIGO_EXTRACTO"] = split_res[0].fillna("").astype(str).str.strip()
   
