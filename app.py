@@ -12,7 +12,6 @@ from google.oauth2.service_account import Credentials
 import gspread
 from PIL import Image, ImageDraw, ImageFont
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 from streamlit_qrcode_scanner import qrcode_scanner
 import qrcode
@@ -722,36 +721,36 @@ try:
       pct_global_productos = 0.0
       productos_completados = 0
 
-    col_ind1, col_ind2, col_ind3 = st.columns([1.5, 2.5, 1])
-    with col_ind1:
-      st.metric(
-          label="🚀 AVANCE GLOBAL",
-          value=f"{pct_global_productos:.1f}%",
-          delta=f"{productos_completados}/{total_productos} al 100%"
-      )
-    with col_ind2:
-      # Gráfico de barra de progreso espectacular con Plotly
-      fig_barra = go.Figure(go.Bar(
-          x=[pct_global_productos],
-          y=["Progreso"],
-          orientation='h',
-          marker=dict(
-              color='#2980B9' if pct_global_productos < 100 else '#27AE60',
-              line=dict(color='#1B4F72', width=2)
-          )
-      ))
-      fig_barra.update_layout(
-          xaxis=dict(range=[0, 100], showgrid=False, showticklabels=False, zeroline=False),
-          yaxis=dict(showgrid=False, showticklabels=False),
-          margin=dict(l=0, r=0, t=10, b=10),
-          height=85,
-          paper_bgcolor='rgba(0,0,0,0)',
-          plot_bgcolor='rgba(0,0,0,0)'
-      )
-      st.plotly_chart(fig_barra, use_container_width=True, config={'displayModeBar': False})
+    # Color de barra dinámico
+    color_barra = "#27AE60" if pct_global_productos >= 100 else "#2980B9"
 
-    with col_ind3:
-      st.markdown("<br>", unsafe_allow_html=True)
+    # Tarjeta de diseño avanzado con barra de progreso estilizada en HTML/CSS
+    st.markdown(
+        f"""
+        <div style="background-color: {C_CARD_BG}; border: 1px solid #D4E6F1; border-left: 8px solid {color_barra}; border-radius: 14px; padding: 22px 26px; box-shadow: 0 6px 12px rgba(0,0,0,0.08); margin-bottom: 25px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div>
+                    <span style="font-size: 13px; font-weight: 700; color: #7F8C8D; letter-spacing: 1px;">🚀 AVANCE GLOBAL DE PRODUCTOS</span>
+                    <h1 style="font-size: 42px; font-weight: 800; color: {C_TEXT}; margin: 0; line-height: 1.1;">{pct_global_productos:.1f}%</h1>
+                </div>
+                <div style="text-align: right;">
+                    <span style="background-color: #E8F8F5; color: #27AE60; padding: 6px 14px; border-radius: 20px; font-weight: bold; font-size: 14px; border: 1px solid #A3E4D7;">
+                        ✓ {productos_completados} de {total_productos} productos al 100%
+                    </span>
+                </div>
+            </div>
+            <!-- Contenedor de la barra de progreso (Fondo gris con barra de color de avance) -->
+            <div style="background-color: #EAEDED; border-radius: 10px; width: 100%; height: 24px; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);">
+                <div style="background-color: {color_barra}; width: {min(pct_global_productos, 100.0)}%; height: 100%; border-radius: 10px; transition: width 0.5s ease-in-out;"></div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # Botón de Descarga alineado perfectamente debajo
+    col_dl1, col_dl2 = [st.columns([4, 1])[0], st.columns([4, 1])[1]]
+    with col_dl2:
       buffer_reporte = io.BytesIO()
       with pd.ExcelWriter(buffer_reporte, engine="openpyxl") as writer:
         avance_df.to_excel(writer, index=False, sheet_name="Avance de Produccion")
