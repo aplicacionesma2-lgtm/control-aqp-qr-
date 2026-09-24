@@ -315,25 +315,30 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       (c for c in df_receta.columns if "COMPONENTE" in c), "COD COMPONENTE"
   )
 
-  # Identificar la descripción del componente (evitando la descripción del producto padre)
-  # Buscamos columnas que tengan DESCRIPCIÓN o PRODUCTO pero que NO sean la primera del producto padre
-  cols_desc = [
+  # Buscar la columna de descripción específica del componente (que contenga COMPONENTE o DESC/PROD de componente)
+  # Evitamos tajantemente la columna de descripción del producto principal (ej. "PRODUCTO" o "DESCRIPCIÓN" a secas si es del padre)
+  cols_desc_comp = [
       c
       for c in df_receta.columns
-      if ("DESCRIPCIÓN" in c or "PRODUCTO" in c) and c != "PRODUCTO"
-  ]
-  col_desc_comp = (
-      cols_desc[0]
-      if cols_desc
-      else next(
-          (
-              c
-              for c in df_receta.columns
-              if "DESCRIPCIÓN" in c or "PRODUCTO" in c
-          ),
-          col_comp_receta,
+      if (
+          "COMPONENTE" in c
+          and ("DESC" in c or "PROD" in c or "DESCRIPCIÓN" in c)
       )
-  )
+      or (c != col_cod_receta and c != "PRODUCTO" and "DESCRIPCIÓN" in c)
+  ]
+  if cols_desc_comp:
+    col_desc_comp = cols_desc_comp[0]
+  else:
+    # Si no hay una específica, tomamos la columna que está exactamente al lado del código del componente si es posible, o la segunda columna de texto
+    idx_comp = (
+        list(df_receta.columns).index(col_comp_receta)
+        if col_comp_receta in df_receta.columns
+        else 0
+    )
+    if idx_comp + 1 < len(df_receta.columns):
+      col_desc_comp = df_receta.columns[idx_comp + 1]
+    else:
+      col_desc_comp = col_comp_receta
 
   df_merged = pd.merge(
       df_receta,
