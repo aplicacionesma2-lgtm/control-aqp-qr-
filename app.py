@@ -817,7 +817,7 @@ try:
     buffer_reporte.seek(0)
 
     st.download_button(
-        label="📥 Descargar Reporte Consolidado (Excel para el Jefe)",
+        label="📥 Descargar Reporte Consolidado",
         data=buffer_reporte,
         file_name=(
             "reporte_consolidado_empaque_"
