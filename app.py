@@ -311,29 +311,8 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       (c for c in df_receta.columns if "CÓDIGO" in c or "CODIGO" in c), "CÓDIGO"
   )
   col_comp_receta = next(
-      (c for c in df_receta.columns if "COMPONENTE" in c), "COD COMPONENTE"
+      (c for c in df_receta.columns if "COMPONENTE" in c), "COMPONENTE"
   )
-
-  # --- CORRECCIÓN: Búsqueda robusta de la descripción de texto del componente ---
-  col_desc_comp = None
-  for c in df_receta.columns:
-    c_upper = str(c).upper()
-    if (
-        ("DESC" in c_upper or "NOMBRE" in c_upper or "TEXTO" in c_upper)
-        and c_upper != col_comp_receta
-        and c_upper != col_cod_receta
-    ):
-      col_desc_comp = c
-      break
-
-  if not col_desc_comp:
-    for c in df_receta.columns:
-      if c not in [col_cod_receta, col_comp_receta] and df_receta[c].dtype == object:
-        col_desc_comp = c
-        break
-
-  if not col_desc_comp:
-    col_desc_comp = df_receta.columns[1]
 
   df_merged = pd.merge(
       df_receta,
@@ -345,9 +324,16 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
 
   df_merged["REQ_COMPONENTE"] = df_merged["REQ_REAL"]
 
+  # Filtrar componentes que comiencen con 'M' en la columna COMPONENTE
   df_m = df_merged[
       df_merged[col_comp_receta].astype(str).str.upper().str.startswith("M")
   ].copy()
+
+  # Extraer el código limpio (ej. 'M1020065') del texto de la columna COMPONENTE
+  df_m["CÓDIGO_EXTRACTO"] = (
+      df_m[col_comp_receta].astype(str).str.split().str[0].str.strip()
+  )
+  df_m["DESCRIPCIÓN_COMP"] = df_m[col_comp_receta].astype(str).str.strip()
 
   col_cod_f = next(
       (c for c in df_factor.columns if "COD" in c), df_factor.columns[0]
@@ -358,11 +344,12 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
   df_factor = df_factor.rename(
       columns={col_cod_f: "CÓDIGO_LIMA", col_fac_f: "FACTOR_VALOR"}
   )
+  df_factor["CÓDIGO_LIMA"] = df_factor["CÓDIGO_LIMA"].astype(str).str.strip()
 
   df_final = pd.merge(
       df_m,
       df_factor,
-      left_on=col_comp_receta,
+      left_on="CÓDIGO_EXTRACTO",
       right_on="CÓDIGO_LIMA",
       how="left",
   )
@@ -375,7 +362,7 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
 
   df_grouped = (
       df_final.groupby(
-          [col_comp_receta, col_desc_comp, "FACTOR_LIMA"], as_index=False
+          ["CÓDIGO_EXTRACTO", "DESCRIPCIÓN_COMP", "FACTOR_LIMA"], as_index=False
       )["REQ_COMPONENTE"]
       .sum()
       .rename(columns={"REQ_COMPONENTE": "REQ_TOTAL"})
@@ -389,16 +376,16 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
 
   return (
       df_grouped[[
-          col_comp_receta,
-          col_desc_comp,
+          "CÓDIGO_EXTRACTO",
+          "DESCRIPCIÓN_COMP",
           "REQ_TOTAL",
           "FACTOR_LIMA",
           "REQ_REDONDEADO",
       ]]
       .rename(
           columns={
-              col_comp_receta: "CÓDIGO",
-              col_desc_comp: "DESCRIPCIÓN",
+              "CÓDIGO_EXTRACTO": "CÓDIGO",
+              "DESCRIPCIÓN_COMP": "DESCRIPCIÓN",
               "REQ_TOTAL": "REQUERIMIENTO NETO",
               "FACTOR_LIMA": "FACTOR LIMA",
               "REQ_REDONDEADO": "REQUERIMIENTO REDONDEADO",
