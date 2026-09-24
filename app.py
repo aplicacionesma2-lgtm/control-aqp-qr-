@@ -678,7 +678,7 @@ try:
         umi = (
             ped_row.iloc[0]["umi"]
             if not ped_row.empty
-            else cat_row.iloc[0]["umr"]
+            else cat_row["umr"]
         )
 
         avance_prod = avance_df[avance_df["codigo"] == codigo_actual]
@@ -722,14 +722,35 @@ try:
       pct_global_productos = 0.0
       productos_completados = 0
 
-    col_ind1, col_ind2 = st.columns([3, 1])
+    col_ind1, col_ind2, col_ind3 = st.columns([1.5, 2.5, 1])
     with col_ind1:
       st.metric(
-          label="🚀 AVANCE GLOBAL DE PRODUCTOS COMPLETADOS",
+          label="🚀 AVANCE GLOBAL",
           value=f"{pct_global_productos:.1f}%",
-          delta=f"{productos_completados} de {total_productos} productos al 100%"
+          delta=f"{productos_completados}/{total_productos} al 100%"
       )
     with col_ind2:
+      # Gráfico de barra de progreso espectacular con Plotly
+      fig_barra = go.Figure(go.Bar(
+          x=[pct_global_productos],
+          y=["Progreso"],
+          orientation='h',
+          marker=dict(
+              color='#2980B9' if pct_global_productos < 100 else '#27AE60',
+              line=dict(color='#1B4F72', width=2)
+          )
+      ))
+      fig_barra.update_layout(
+          xaxis=dict(range=[0, 100], showgrid=False, showticklabels=False, zeroline=False),
+          yaxis=dict(showgrid=False, showticklabels=False),
+          margin=dict(l=0, r=0, t=10, b=10),
+          height=85,
+          paper_bgcolor='rgba(0,0,0,0)',
+          plot_bgcolor='rgba(0,0,0,0)'
+      )
+      st.plotly_chart(fig_barra, use_container_width=True, config={'displayModeBar': False})
+
+    with col_ind3:
       st.markdown("<br>", unsafe_allow_html=True)
       buffer_reporte = io.BytesIO()
       with pd.ExcelWriter(buffer_reporte, engine="openpyxl") as writer:
@@ -777,7 +798,6 @@ try:
 
       st.markdown(f"Mostrando **{len(df_filtrado)}** de **{len(registros_df)}** registros totales.")
 
-      # Tabla Interactiva con selección por Casilla (Checkbox) para eliminar o editar
       df_editable = df_filtrado.copy()
       df_editable.insert(0, "Seleccionar", False)
 
@@ -788,7 +808,6 @@ try:
           disabled=[col for col in df_editable.columns if col != "Seleccionar"]
       )
 
-      # Identificar registros seleccionados
       seleccionados = edited_df[edited_df["Seleccionar"] == True]
 
       if not seleccionados.empty:
