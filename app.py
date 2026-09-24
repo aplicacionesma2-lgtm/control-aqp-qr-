@@ -329,11 +329,11 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       df_merged[col_comp_receta].astype(str).str.upper().str.startswith("M")
   ].copy()
 
-  # Extraer el código limpio (ej. 'M1020065') del texto de la columna COMPONENTE
-  df_m["CÓDIGO_EXTRACTO"] = (
-      df_m[col_comp_receta].astype(str).str.split().str[0].str.strip()
-  )
-  df_m["DESCRIPCIÓN_COMP"] = df_m[col_comp_receta].astype(str).str.strip()
+  # --- CORRECCIÓN: Separar correctamente el Código y la Descripción del texto de COMPONENTE ---
+  s_comp = df_m[col_comp_receta].astype(str).str.strip()
+  df_m["CÓDIGO_EXTRACTO"] = s_comp.str.split(n=1).str[0].str.strip()
+  df_m["DESCRIPCIÓN_COMP"] = s_comp.str.split(n=1).str[1].str.strip()
+  df_m["DESCRIPCIÓN_COMP"] = df_m["DESCRIPCIÓN_COMP"].fillna(df_m["CÓDIGO_EXTRACTO"])
 
   col_cod_f = next(
       (c for c in df_factor.columns if "COD" in c), df_factor.columns[0]
