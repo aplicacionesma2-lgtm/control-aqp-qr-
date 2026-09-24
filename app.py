@@ -319,7 +319,6 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       (c for c in df_receta.columns if "COMPONENTE" in c), "COMPONENTE"
   )
 
-  # Forzar conversión absoluta a string en columnas clave para prevenir errores de tipo float
   df_receta[col_cod_receta] = (
       df_receta[col_cod_receta].fillna("").astype(str).str.strip()
   )
@@ -337,13 +336,26 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
 
   df_merged["REQ_COMPONENTE"] = df_merged["REQ_REAL"]
 
-  s_comp = df_merged[col_comp_receta]
+  # Blindaje total: forzar conversión a string directamente sobre la serie antes de usar .str
+  s_comp = (
+      df_merged[col_comp_receta]
+      .fillna("")
+      .astype(str)
+      .str.strip()
+  )
+
   df_m = df_merged[
       s_comp.str.upper().str.startswith("M")
       & (s_comp.str.upper() != "NAN")
       & (s_comp != "")
   ].copy()
-  s_comp_m = df_m[col_comp_receta]
+  
+  s_comp_m = (
+      df_m[col_comp_receta]
+      .fillna("")
+      .astype(str)
+      .str.strip()
+  )
 
   df_m["CÓDIGO_EXTRACTO"] = s_comp_m.str.split(n=1).str[0].str.strip()
   df_m["DESCRIPCIÓN_COMP"] = s_comp_m.str.split(n=1).str[1].str.strip()
