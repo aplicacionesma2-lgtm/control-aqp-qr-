@@ -652,7 +652,7 @@ try:
       "📊 Avance",
       "🕒 Historial",
       "🏷️ Etiquetas",
-      "⚙️ Factor M",
+      "⚙️ ST 014-072",
   ])
 
   with tab1:
@@ -890,7 +890,7 @@ try:
           st.markdown("---")
 
   with tab5:
-    st.markdown("### ⚙️ Requerimiento de Componentes (Factor M)")
+    st.markdown("### ⚙️ Requerimiento de Componentes (ST 014-072)")
     if "archivo_bytes_actual" in st.session_state:
       df_fm = calcular_componentes_factor_m(
           pedido_df,
@@ -901,11 +901,11 @@ try:
 
         buffer_excel = io.BytesIO()
         with pd.ExcelWriter(buffer_excel, engine="openpyxl") as writer:
-          df_fm.to_excel(writer, index=False, sheet_name="Factor M")
+          df_fm.to_excel(writer, index=False, sheet_name="ST 014-072")
         buffer_excel.seek(0)
 
         st.download_button(
-            label="📥 Descargar Factor M a Excel",
+            label="📥 Descargar ST 014-072 a Excel",
             data=buffer_excel,
             file_name=(
                 "requerimiento_factor_m_"
