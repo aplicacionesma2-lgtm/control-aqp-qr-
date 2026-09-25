@@ -40,24 +40,24 @@ with st.sidebar:
   )
   st.markdown("---")
 
-# Paletas de colores adaptativas
+# Paletas de colores adaptativas con acento corporativo de María Almenara (Rosa/Fucsia: #D4145A)
 if st.session_state["tema"] == "Oscuro":
   C_BG = "#1A252F"
   C_SIDEBAR = "#11181E"
   C_CARD_BG = "#212F3D"
   C_TEXT = "#F2F4F4"
-  C_PRIMARY = "#2980B9"
-  C_PRIMARY_DARK = "#1A5276"
-  C_ACCENT = "#5499C7"
+  C_PRIMARY = "#D4145A"
+  C_PRIMARY_DARK = "#B5104C"
+  C_ACCENT = "#E64A81"
   CSS_THEME_EXTRA = "color: #F2F4F4 !important;"
 else:
-  C_BG = "#F4F6F7"
+  C_BG = "#F8F9FA"
   C_SIDEBAR = "#154360"
   C_CARD_BG = "#FFFFFF"
   C_TEXT = "#2C3E50"
-  C_PRIMARY = "#1B4F72"
-  C_PRIMARY_DARK = "#154360"
-  C_ACCENT = "#2980B9"
+  C_PRIMARY = "#D4145A"
+  C_PRIMARY_DARK = "#B5104C"
+  C_ACCENT = "#E64A81"
   CSS_THEME_EXTRA = ""
 
 st.markdown(
@@ -67,9 +67,9 @@ st.markdown(
     section[data-testid="stSidebar"] {{ background-color: {C_SIDEBAR}; }}
     section[data-testid="stSidebar"] * {{ color: #F2F2F2 !important; }}
     div[data-testid="stMetric"] {{
-        background-color: {C_CARD_BG}; border: 1px solid #D4E6F1;
+        background-color: {C_CARD_BG}; border: 1px solid #FADBD8;
         border-left: 6px solid {C_PRIMARY}; border-radius: 12px; padding: 14px 18px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.08);
     }}
     .stButton>button {{
         background-color: {C_PRIMARY};
@@ -638,14 +638,14 @@ try:
       st.rerun()
 
   if pedido_df.empty or catalogo_df.empty:
-    st.title("📦 Control de Empaque QR")
+    st.title("📦 Control de Empaque QR — María Almenara")
     st.info("👈 Sube el archivo Excel en la barra lateral para iniciar.")
     st.stop()
 
   registros_df = cargar_registros()
   avance_df = calcular_avance(pedido_df, registros_df)
 
-  st.title("📦 Control de Empaque QR")
+  st.title("📦 Control de Empaque QR — María Almenara")
   
   tab1, tab2, tab3, tab4, tab5 = st.tabs([
       "📷 Escanear",
@@ -721,25 +721,22 @@ try:
       pct_global_productos = 0.0
       productos_completados = 0
 
-    # Color de barra dinámico
-    color_barra = "#27AE60" if pct_global_productos >= 100 else "#2980B9"
+    color_barra = "#27AE60" if pct_global_productos >= 100 else C_PRIMARY
 
-    # Tarjeta de diseño avanzado con barra de progreso estilizada en HTML/CSS
     st.markdown(
         f"""
-        <div style="background-color: {C_CARD_BG}; border: 1px solid #D4E6F1; border-left: 8px solid {color_barra}; border-radius: 14px; padding: 22px 26px; box-shadow: 0 6px 12px rgba(0,0,0,0.08); margin-bottom: 25px;">
+        <div style="background-color: {C_CARD_BG}; border: 1px solid #FADBD8; border-left: 8px solid {color_barra}; border-radius: 14px; padding: 22px 26px; box-shadow: 0 6px 12px rgba(0,0,0,0.08); margin-bottom: 25px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                 <div>
                     <span style="font-size: 13px; font-weight: 700; color: #7F8C8D; letter-spacing: 1px;">🚀 AVANCE GLOBAL DE PRODUCTOS</span>
                     <h1 style="font-size: 42px; font-weight: 800; color: {C_TEXT}; margin: 0; line-height: 1.1;">{pct_global_productos:.1f}%</h1>
                 </div>
                 <div style="text-align: right;">
-                    <span style="background-color: #E8F8F5; color: #27AE60; padding: 6px 14px; border-radius: 20px; font-weight: bold; font-size: 14px; border: 1px solid #A3E4D7;">
+                    <span style="background-color: #FDEDEC; color: #D4145A; padding: 6px 14px; border-radius: 20px; font-weight: bold; font-size: 14px; border: 1px solid #F5B7B1;">
                         ✓ {productos_completados} de {total_productos} productos al 100%
                     </span>
                 </div>
             </div>
-            <!-- Contenedor de la barra de progreso (Fondo gris con barra de color de avance) -->
             <div style="background-color: #EAEDED; border-radius: 10px; width: 100%; height: 24px; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);">
                 <div style="background-color: {color_barra}; width: {min(pct_global_productos, 100.0)}%; height: 100%; border-radius: 10px; transition: width 0.5s ease-in-out;"></div>
             </div>
@@ -748,7 +745,6 @@ try:
         unsafe_allow_html=True
     )
 
-    # Botón de Descarga alineado perfectamente debajo
     col_dl1, col_dl2 = [st.columns([4, 1])[0], st.columns([4, 1])[1]]
     with col_dl2:
       buffer_reporte = io.BytesIO()
