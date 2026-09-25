@@ -833,7 +833,7 @@ try:
             st.rerun()
 
   with tab4:
-    st.markdown("### 🏷️ Generador de Etiquetas QR Múltiples")
+    st.markdown("### 🏷️ Generador de Etiquetas QR")
     st.markdown("Selecciona uno o varios productos para generar y descargar sus etiquetas en lote.")
 
     opciones_prod = [
