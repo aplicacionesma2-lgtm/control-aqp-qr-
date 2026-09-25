@@ -1,6 +1,6 @@
 """
-Control de Empaque QR — María Almenara
-========================================
+Control de Empaque Sede AREQUIPA
+================================
 """
 
 from datetime import datetime, timezone, timedelta
@@ -17,7 +17,7 @@ from streamlit_qrcode_scanner import qrcode_scanner
 import qrcode
 
 st.set_page_config(
-    page_title="Control de Empaque QR — María Almenara",
+    page_title="Control de Empaque Sede AREQUIPA",
     page_icon="📦",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -638,14 +638,14 @@ try:
       st.rerun()
 
   if pedido_df.empty or catalogo_df.empty:
-    st.title("📦 Control de Empaque QR — María Almenara")
+    st.title("📦 Control de Empaque Sede AREQUIPA")
     st.info("👈 Sube el archivo Excel en la barra lateral para iniciar.")
     st.stop()
 
   registros_df = cargar_registros()
   avance_df = calcular_avance(pedido_df, registros_df)
 
-  st.title("📦 Control de Empaque QR — María Almenara")
+  st.title("📦 Control de Empaque Sede AREQUIPA")
   
   tab1, tab2, tab3, tab4, tab5 = st.tabs([
       "📷 Escanear",
