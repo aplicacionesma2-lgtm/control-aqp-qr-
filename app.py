@@ -395,7 +395,7 @@ def calcular_avance(
 
 
 def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=None) -> pd.DataFrame:
-  """Extrae los componentes de la hoja 'Receta' haciendo match exacto con el código del producto."""
+  """Extrae los componentes de la hoja 'Receta' haciendo match flexible con el código del producto."""
   try:
     if archivo_subido is not None:
       xl = pd.ExcelFile(archivo_subido)
@@ -410,26 +410,62 @@ def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=
   if df_receta.empty:
     return pd.DataFrame()
 
+  # Normalizar nombres de columnas a mayúsculas y sin espacios extra
   df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
   codigo_buscado = str(codigo_prod).strip().upper()
 
-  col_prod = "CÓDIGO" if "CÓDIGO" in df_receta.columns else df_receta.columns[0]
-  df_receta[col_prod] = df_receta[col_prod].fillna("").astype(str).str.strip().str.upper()
+  # Buscar columna de producto de forma flexible
+  col_prod = None
+  for c in df_receta.columns:
+    if "CÓDIGO" in c or "CODIGO" in c or "COD" in c or "PRODUCTO" in c:
+      col_prod = c
+      break
+  if not col_prod:
+    col_prod = df_receta.columns[0]
 
+  df_receta[col_prod] = df_receta[col_prod].fillna("").astype(str).str.strip().str.upper()
   matches = df_receta[df_receta[col_prod] == codigo_buscado]
+  
+  if matches.empty:
+    # Intento secundario por coincidencia parcial
+    matches = df_receta[df_receta[col_prod].str.contains(codigo_buscado, na=False)]
   if matches.empty:
     return pd.DataFrame()
 
-  col_cod_comp = "COD COMPONENTE" if "COD COMPONENTE" in df_receta.columns else df_receta.columns[4]
-  col_desc_comp = "COMPONENTE" if "COMPONENTE" in df_receta.columns else df_receta.columns[5]
-  col_cant = "CANTIDAD" if "CANTIDAD" in df_receta.columns else None
+  # Buscar columnas de componentes de forma flexible
+  col_cod_comp = None
+  col_desc_comp = None
+  col_cant = None
+
+  for c in df_receta.columns:
+    if ("COD" in c or "CÓD" in c) and ("COMP" in c or "INSUMO" in c):
+      col_cod_comp = c
+      break
+  if not col_cod_comp and len(df_receta.columns) > 4:
+    col_cod_comp = df_receta.columns[4]
+  elif not col_cod_comp:
+    col_cod_comp = df_receta.columns[1]
+
+  for c in df_receta.columns:
+    if "COMP" in c and c != col_cod_comp:
+      col_desc_comp = c
+      break
+  if not col_desc_comp and len(df_receta.columns) > 5:
+    col_desc_comp = df_receta.columns[5]
+  elif not col_desc_comp:
+    col_desc_comp = col_cod_comp
+
+  for c in df_receta.columns:
+    if "CANT" in c or "CANTIDAD" in c:
+      col_cant = c
+      break
 
   resultados = []
   for _, row in matches.iterrows():
     c_comp = str(row.get(col_cod_comp, "")).strip()
     d_comp = str(row.get(col_desc_comp, c_comp)).strip()
     
-    if not c_comp or c_comp.upper() == "NAN":
+    if not c_comp or c_comp.upper() in ["NAN", "NONE", ""]:
       continue
 
     cant_base = 1.0
