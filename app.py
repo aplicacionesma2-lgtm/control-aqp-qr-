@@ -4,7 +4,7 @@ import io
 
 st.set_page_config(page_title="Simulador de Costos y Recetas - Maria Almenara", page_icon="📦", layout="wide")
 
-st.title("📦 Simulador de Costos y Recetas - Producción")
+st.title("📦 Simulador de Costos, Recetas y Etiquetas - Producción")
 st.markdown("---")
 
 # ==========================================
@@ -15,7 +15,6 @@ archivo_excel = st.sidebar.file_uploader("Sube tu archivo Excel principal (ej. c
 
 if archivo_excel is not None:
     try:
-        # Leer las hojas directamente sin caché para evitar errores de serialización
         archivo_excel.seek(0)
         xl_temp = pd.ExcelFile(archivo_excel)
         hojas = xl_temp.sheet_names
@@ -35,7 +34,6 @@ if archivo_excel is not None:
                 archivo_excel.seek(0)
                 xl = pd.ExcelFile(archivo_excel)
                 
-                # Buscar hoja 'Receta' sin distinción de mayúsculas/minúsculas o tildes
                 nombre_hoja = next((s for s in xl.sheet_names if "receta" in s.strip().lower()), None)
                 if not nombre_hoja:
                     return pd.DataFrame()
@@ -47,15 +45,12 @@ if archivo_excel is not None:
             if df_receta.empty:
                 return pd.DataFrame()
 
-            # Normalizar nombres de columnas a mayúsculas
             df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
             codigo_buscado = str(codigo_prod).strip().upper()
 
-            # La primera columna es el código del producto principal
             col_prod = df_receta.columns[0]
             df_receta[col_prod] = df_receta[col_prod].fillna("").astype(str).str.strip().str.upper()
 
-            # Filtrar coincidencias exactas con el código buscado
             matches = df_receta[df_receta[col_prod] == codigo_buscado]
             if matches.empty:
                 matches = df_receta[df_receta[col_prod].str.contains(codigo_buscado, na=False)]
@@ -63,7 +58,6 @@ if archivo_excel is not None:
             if matches.empty:
                 return pd.DataFrame()
 
-            # Identificar columnas correspondientes de acuerdo a tu estructura de Excel
             col_cod_comp = next((c for c in df_receta.columns if "COD" in c and "COMP" in c), df_receta.columns[4] if len(df_receta.columns) > 4 else df_receta.columns[1])
             col_desc_comp = next((c for c in df_receta.columns if c == "COMPONENTE" or ("COMP" in c and c != col_cod_comp)), df_receta.columns[5] if len(df_receta.columns) > 5 else col_cod_comp)
             col_cant = next((c for c in df_receta.columns if "CANTIDAD" in c or "CANT" in c), df_receta.columns[6] if len(df_receta.columns) > 6 else None)
@@ -157,13 +151,38 @@ if archivo_excel is not None:
             if not df_componentes.empty:
                 st.dataframe(df_componentes, use_container_width=True)
                 
-                csv_data = df_componentes.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Descargar Insumos en CSV",
-                    data=csv_data,
-                    file_name=f"insumos_{codigo_a_buscar}.csv",
-                    mime="text/csv"
-                )
+                # ==========================================
+                # 4. SECCIÓN DE DESCARGA E IMPRESIÓN DE ETIQUETAS
+                # ==========================================
+                st.markdown("---")
+                st.subheader("🖨️ Gestión e Impresión de Etiquetas")
+                
+                tab_descarga, tab_etiquetas = st.tabs(["📥 Descarga de Insumos", "🏷️ Vista Previa de Etiquetas"])
+                
+                with tab_descarga:
+                    csv_data = df_componentes.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label="📥 Descargar Insumos en CSV",
+                        data=csv_data,
+                        file_name=f"insumos_{codigo_a_buscar}.csv",
+                        mime="text/csv"
+                    )
+                
+                with tab_etiquetas:
+                    st.info("Vista previa de formato de etiquetas listas para empaque y producción:")
+                    for _, row in df_componentes.iterrows():
+                        with st.container():
+                            st.markdown(
+                                f"""
+                                <div style="border: 2px dashed #4CAF50; padding: 12px; border-radius: 8px; margin-bottom: 10px; background-color: #f9f9f9;">
+                                    <h4 style="margin: 0; color: #2E7D32;">🏷️ ETIQUETA DE COMPONENTE</h4>
+                                    <p style="margin: 4px 0 0 0;"><b>Producto Padre:</b> {desc_prod} ({codigo_a_buscar})</p>
+                                    <p style="margin: 2px 0;"><b>Insumo:</b> {row['Descripción Componente']} (<code>{row['Código Componente']}</code>)</p>
+                                    <p style="margin: 2px 0;"><b>Cantidad Requerida:</b> <b>{row['Cantidad Requerida']}</b></p>
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
             else:
                 st.warning(f"No se encontraron componentes en la hoja 'Receta' para el código `{codigo_a_buscar}`.")
     else:
