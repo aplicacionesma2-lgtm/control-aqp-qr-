@@ -12,7 +12,6 @@ from google.oauth2.service_account import Credentials
 import gspread
 from PIL import Image, ImageDraw, ImageFont
 import pandas as pd
-import streamlit as streamlit_mod
 import streamlit as st
 from streamlit_qrcode_scanner import qrcode_scanner
 import qrcode
@@ -390,7 +389,7 @@ def calcular_avance(
 
 
 def obtener_componentes_producto(codigo_prod: str, archivo_subido=None) -> pd.DataFrame:
-  """Extrae los componentes de la hoja 'Receta' asociados al código escaneado."""
+  """Extrae los componentes de la hoja 'Receta' buscando en cualquier columna el código."""
   try:
     if archivo_subido is not None:
       xl = pd.ExcelFile(archivo_subido)
@@ -403,25 +402,34 @@ def obtener_componentes_producto(codigo_prod: str, archivo_subido=None) -> pd.Da
     return pd.DataFrame()
 
   df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
-  col_cod_receta = next((c for c in df_receta.columns if "CÓDIGO" in c or "CODIGO" in c), df_receta.columns[0])
-  col_cod_comp = next((c for c in df_receta.columns if "COD" in c and ("COMPONENTE" in c or "COMP" in c)), None)
-  col_desc_comp = next((c for c in df_receta.columns if c != col_cod_comp and "COMPONENTE" in c), None)
-
-  if not col_cod_comp:
-    col_cod_comp = next((c for c in df_receta.columns if "COMPONENTE" in c), df_receta.columns[1])
-  if not col_desc_comp:
-    col_desc_comp = col_cod_comp
-
-  df_receta[col_cod_receta] = df_receta[col_cod_receta].fillna("").astype(str).str.strip()
+  codigo_buscado = str(codigo_prod).strip().upper()
   
-  # Filtrar por el código exacto
-  df_prod_receta = df_receta[df_receta[col_cod_receta] == str(codigo_prod).strip().upper()].copy()
-  if df_prod_receta.empty:
+  # Buscar filas donde cualquier columna coincida con el código del producto
+  matches = pd.DataFrame()
+  for col in df_receta.columns:
+    mask = df_receta[col].fillna("").astype(str).str.strip().str.upper() == codigo_buscado
+    if mask.any():
+      matches = df_receta[mask]
+      break
+
+  if matches.empty:
     return pd.DataFrame()
 
+  # Identificar columnas de componentes / insumos
+  col_cod_comp = next((c for c in df_receta.columns if "COD" in c and ("COMP" in c or "INSUMO" in c)), None)
+  col_desc_comp = next((c for c in df_receta.columns if "DESC" in c and ("COMP" in c or "INSUMO" in c)), None)
+  
+  if not col_cod_comp:
+    cols_candidatas = [c for c in df_receta.columns if "COMP" in c or "INSUMO" in c]
+    col_cod_comp = cols_candidatas[0] if cols_candidatas else df_receta.columns[1] if len(df_receta.columns) > 1 else df_receta.columns[0]
+    
+  if not col_desc_comp:
+    cols_desc = [c for c in df_receta.columns if "DESC" in c or "NOMBRE" in c]
+    col_desc_comp = cols_desc[0] if cols_desc else col_cod_comp
+
   resultado = pd.DataFrame({
-      "Código Componente": df_prod_receta[col_cod_comp].astype(str),
-      "Descripción Componente": df_prod_receta[col_desc_comp].astype(str)
+      "Código Componente": matches[col_cod_comp].astype(str),
+      "Descripción Componente": matches[col_desc_comp].astype(str)
   })
   return resultado.drop_duplicates().reset_index(drop=True)
 
@@ -670,7 +678,7 @@ try:
 
         st.markdown(f"**Producto:** {prod} (`{codigo_actual}`)")
         
-        # --- NUEVO: DESGLOSE DE COMPONENTES DE LA RECETA ---
+        # --- DESGLOSE AUTOMÁTICO DE COMPONENTES DE LA RECETA ---
         if "archivo_bytes_actual" in st.session_state:
           df_comp_prod = obtener_componentes_producto(
               codigo_actual, 
