@@ -395,67 +395,62 @@ def calcular_avance(
 
 
 def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=None) -> pd.DataFrame:
-  """Extrae los componentes de la hoja 'Receta' utilizando índices posicionales seguros."""
+  """Extrae los componentes de la hoja 'Receta' haciendo match flexible con el código del producto."""
   try:
     if archivo_subido is not None:
       xl = pd.ExcelFile(archivo_subido)
       if "Receta" not in xl.sheet_names:
         return pd.DataFrame()
-      df_receta = xl.parse("Receta", header=0) # Lee la primera fila como cabecera pero usamos posiciones
+      df_receta = xl.parse("Receta")
     else:
       return pd.DataFrame()
   except Exception:
     return pd.DataFrame()
 
-  if df_receta.empty or df_receta.shape[1] < 2:
+  if df_receta.empty:
     return pd.DataFrame()
 
+  df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
   codigo_buscado = str(codigo_prod).strip().upper()
 
-  # Asegurarnos de tener suficientes columnas (al menos 2: producto y componente)
+  col_prod = df_receta.columns[0]
+  df_receta[col_prod] = df_receta[col_prod].fillna("").astype(str).str.strip().str.upper()
+
+  matches = df_receta[df_receta[col_prod] == codigo_buscado]
+  if matches.empty:
+    matches = df_receta[df_receta[col_prod].str.contains(codigo_buscado, na=False)]
+  if matches.empty:
+    return pd.DataFrame()
+
   num_cols = df_receta.shape[1]
-  
-  # Columna 0: Producto principal
-  col_prod_idx = 0
-  # Columna 4: Código Componente (si existe, sino la que esté cerca o la 1)
-  col_comp_idx = 4 if num_cols > 4 else 1
-  # Columna 5: Descripción Componente
-  col_desc_idx = 5 if num_cols > 5 else col_comp_idx
-  # Columna 6: Cantidad
-  col_cant_idx = 6 if num_cols > 6 else (num_cols - 1)
+  col_cod_comp = df_receta.columns[4] if num_cols > 4 else df_receta.columns[1]
+  col_desc_comp = df_receta.columns[5] if num_cols > 5 else col_cod_comp
+  col_cant = df_receta.columns[6] if num_cols > 6 else None
 
   resultados = []
-  for _, row in df_receta.iterrows():
-    val_prod = str(row.iloc[col_prod_idx]).strip().upper()
+  for _, row in matches.iterrows():
+    c_comp = str(row.get(col_cod_comp, "")).strip()
+    d_comp = str(row.get(col_desc_comp, c_comp)).strip()
     
-    # Verificamos si hace match exacto o parcial con el código buscado
-    if codigo_buscado in val_prod or val_prod == codigo_buscado:
-      c_comp = str(row.iloc[col_comp_idx]).strip()
-      d_comp = str(row.iloc[col_desc_idx]).strip()
-      
-      if not c_comp or c_comp.upper() in ["NAN", "NONE", "", "NAT"]:
-        continue
+    if not c_comp or c_comp.upper() in ["NAN", "NONE", "", "NAT"]:
+      continue
 
-      # Extraer cantidad de forma segura
-      cant_base = 1.0
+    cant_base = 1.0
+    if col_cant is not None:
       try:
-        val_cant = row.iloc[col_cant_idx]
+        val_cant = row.get(col_cant, 1.0)
         cant_base = float(val_cant) if pd.notna(val_cant) else 1.0
-      except (TypeError, ValueError, IndexError):
+      except (TypeError, ValueError):
         cant_base = 1.0
 
-      cant_total = cant_base * float(cajas)
-      resultados.append({
-          "Código Componente": c_comp,
-          "Descripción Componente": d_comp if d_comp and d_comp.upper() != "NAN" else c_comp,
-          "Cantidad": cant_total
-      })
+    cant_total = cant_base * float(cajas)
+    resultados.append({
+        "Código Componente": c_comp,
+        "Descripción Componente": d_comp if d_comp and d_comp.upper() != "NAN" else c_comp,
+        "Cantidad": cant_total
+    })
 
-  df_res = pd.DataFrame(resultados)
-  if df_res.empty:
-    return pd.DataFrame()
-    
-  return df_res.drop_duplicates().reset_index(drop=True)
+  return pd.DataFrame(resultados).drop_duplicates().reset_index(drop=True)
 
 
 def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
@@ -483,9 +478,9 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
   df_data_limpio["CÓDIGO_PROD"] = df_data_limpio["CÓDIGO_PROD"].fillna("").astype(str).str.strip()
 
   col_cod_receta = "CÓDIGO" if "CÓDIGO" in df_receta.columns else df_receta.columns[0]
-  col_cod_comp = "COD COMPONENTE" if "COD COMPONENTE" in df_receta.columns else df_receta.columns[4]
-  col_desc_comp = "COMPONENTE" if "COMPONENTE" in df_receta.columns else df_receta.columns[5]
-  col_cant_receta = "CANTIDAD" if "CANTIDAD" in df_receta.columns else df_receta.columns[6]
+  col_cod_comp = df_receta.columns[4] if len(df_receta.columns) > 4 else df_receta.columns[1]
+  col_desc_comp = df_receta.columns[5] if len(df_receta.columns) > 5 else col_cod_comp
+  col_cant_receta = df_receta.columns[6] if len(df_receta.columns) > 6 else df_receta.columns[-1]
 
   df_receta[col_cod_receta] = df_receta[col_cod_receta].fillna("").astype(str).str.strip()
   df_receta[col_cod_comp] = df_receta[col_cod_comp].fillna("").astype(str).str.strip()
@@ -705,18 +700,25 @@ try:
         unidades = cajas * float(factor)
         st.caption(f"= {fmt_num(unidades)} {umi}")
 
-        # --- DESGLOSE DETALLADO DE COMPONENTES DE LA RECETA ---
+        # --- DESGLOSE DE COMPONENTES DE LA HOJA RECETA ---
+        st.markdown("---")
+        st.markdown("### 📋 Componentes / Insumos de la Receta:")
+        
+        df_comp_prod = pd.DataFrame()
         if "archivo_bytes_actual" in st.session_state:
           df_comp_prod = obtener_componentes_producto(
               codigo_actual, 
               cajas,
               io.BytesIO(st.session_state["archivo_bytes_actual"])
           )
-          if not df_comp_prod.empty:
-            st.markdown("### 📋 Componentes / Insumos:")
-            for _, r in df_comp_prod.iterrows():
-              st.markdown(f"- **{r['Código Componente']}** {r['Descripción Componente']} **({fmt_num(r['Cantidad'])})**")
 
+        if not df_comp_prod.empty:
+          for _, r in df_comp_prod.iterrows():
+            st.markdown(f"- **{r['Código Componente']}** - {r['Descripción Componente']} ➔ **Cantidad: {fmt_num(r['Cantidad'])}**")
+        else:
+          st.info(f"No se encontraron componentes en la hoja 'Receta' para el código {codigo_actual}.")
+
+        st.markdown("---")
         if st.button("✅ Registrar entrega", type="primary"):
           registrar_escaneo(
               codigo_actual,
