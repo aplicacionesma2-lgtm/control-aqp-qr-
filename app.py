@@ -395,7 +395,7 @@ def calcular_avance(
 
 
 def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=None) -> pd.DataFrame:
-  """Busca los componentes escaneando todas las columnas de la hoja 'Receta' para evitar errores de posición."""
+  """Extrae los componentes buscando el código en cualquier columna y detectando las columnas de insumos de forma dinámica."""
   try:
     if archivo_subido is not None:
       xl = pd.ExcelFile(archivo_subido)
@@ -414,28 +414,46 @@ def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=
   df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
   codigo_buscado = str(codigo_prod).strip().upper()
 
-  # Buscar en qué filas aparece el código buscado en CUALQUIER columna del DataFrame
-  mask = pd.DataFrame(False, index=df_receta.index, columns=[0])
-  for col in df_receta.columns:
-    serie_str = df_receta[col].fillna("").astype(str).str.strip().str.upper()
-    match_col = (serie_str == codigo_buscado) | (serie_str.str.contains(codigo_buscado, na=False))
-    mask[0] = mask[0] | match_col
+  # 1. Encontrar qué filas contienen el código del producto en CUALQUIER columna
+  filas_match = []
+  for idx, row in df_receta.iterrows():
+    encontrado_en_fila = False
+    for val in row.values:
+      val_str = str(val).strip().upper()
+      if codigo_buscado in val_str and val_str not in ["NAN", "NONE", ""]:
+        encontrado_en_fila = True
+        break
+    if encontrado_en_fila:
+      filas_match.append(idx)
 
-  matches = df_receta[mask[0]]
-  if matches.empty:
+  if not filas_match:
     return pd.DataFrame()
 
-  num_cols = df_receta.shape[1]
-  col_cod_comp = df_receta.columns[4] if num_cols > 4 else df_receta.columns[1]
-  col_desc_comp = df_receta.columns[5] if num_cols > 5 else col_cod_comp
-  col_cant = df_receta.columns[6] if num_cols > 6 else None
+  matches = df_receta.loc[filas_match]
+
+  # 2. Detectar de forma inteligente las columnas de componentes (buscando texto o usando las últimas columnas disponibles)
+  cols = list(df_receta.columns)
+  
+  # Intentar ubicar columnas que parezcan código de componente o descripción
+  col_cod_comp = cols[1] if len(cols) > 1 else cols[0]
+  col_desc_comp = cols[2] if len(cols) > 2 else col_cod_comp
+  col_cant = cols[3] if len(cols) > 3 else None
+
+  # Buscar si hay alguna columna con nombres específicos
+  for c in cols:
+    if any(k in c for k in ["COMP", "INSUMO", "MAT", "ARTICULO"]):
+      col_cod_comp = c
+    if any(k in c for k in ["DESC", "NOMBRE", "DETALLE"]):
+      col_desc_comp = c
+    if any(k in c for k in ["CANT", "REQ", "CONSUMO", "DOSIS"]):
+      col_cant = c
 
   resultados = []
   for _, row in matches.iterrows():
     c_comp = str(row.get(col_cod_comp, "")).strip()
     d_comp = str(row.get(col_desc_comp, c_comp)).strip()
     
-    if not c_comp or c_comp.upper() in ["NAN", "NONE", "", "NAT"]:
+    if not c_comp or c_comp.upper() in ["NAN", "NONE", "", "NAT"] or c_comp.upper() == codigo_buscado:
       continue
 
     cant_base = 1.0
