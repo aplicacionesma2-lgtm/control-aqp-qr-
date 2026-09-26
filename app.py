@@ -395,94 +395,67 @@ def calcular_avance(
 
 
 def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=None) -> pd.DataFrame:
-  """Extrae los componentes de la hoja 'Receta' haciendo match flexible con el código del producto."""
+  """Extrae los componentes de la hoja 'Receta' utilizando índices posicionales seguros."""
   try:
     if archivo_subido is not None:
       xl = pd.ExcelFile(archivo_subido)
       if "Receta" not in xl.sheet_names:
         return pd.DataFrame()
-      df_receta = xl.parse("Receta")
+      df_receta = xl.parse("Receta", header=0) # Lee la primera fila como cabecera pero usamos posiciones
     else:
       return pd.DataFrame()
   except Exception:
     return pd.DataFrame()
 
-  if df_receta.empty:
+  if df_receta.empty or df_receta.shape[1] < 2:
     return pd.DataFrame()
 
-  # Normalizar nombres de columnas a mayúsculas y sin espacios extra
-  df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
   codigo_buscado = str(codigo_prod).strip().upper()
 
-  # Buscar columna de producto de forma flexible
-  col_prod = None
-  for c in df_receta.columns:
-    if "CÓDIGO" in c or "CODIGO" in c or "COD" in c or "PRODUCTO" in c:
-      col_prod = c
-      break
-  if not col_prod:
-    col_prod = df_receta.columns[0]
-
-  df_receta[col_prod] = df_receta[col_prod].fillna("").astype(str).str.strip().str.upper()
-  matches = df_receta[df_receta[col_prod] == codigo_buscado]
+  # Asegurarnos de tener suficientes columnas (al menos 2: producto y componente)
+  num_cols = df_receta.shape[1]
   
-  if matches.empty:
-    # Intento secundario por coincidencia parcial
-    matches = df_receta[df_receta[col_prod].str.contains(codigo_buscado, na=False)]
-  if matches.empty:
-    return pd.DataFrame()
-
-  # Buscar columnas de componentes de forma flexible
-  col_cod_comp = None
-  col_desc_comp = None
-  col_cant = None
-
-  for c in df_receta.columns:
-    if ("COD" in c or "CÓD" in c) and ("COMP" in c or "INSUMO" in c):
-      col_cod_comp = c
-      break
-  if not col_cod_comp and len(df_receta.columns) > 4:
-    col_cod_comp = df_receta.columns[4]
-  elif not col_cod_comp:
-    col_cod_comp = df_receta.columns[1]
-
-  for c in df_receta.columns:
-    if "COMP" in c and c != col_cod_comp:
-      col_desc_comp = c
-      break
-  if not col_desc_comp and len(df_receta.columns) > 5:
-    col_desc_comp = df_receta.columns[5]
-  elif not col_desc_comp:
-    col_desc_comp = col_cod_comp
-
-  for c in df_receta.columns:
-    if "CANT" in c or "CANTIDAD" in c:
-      col_cant = c
-      break
+  # Columna 0: Producto principal
+  col_prod_idx = 0
+  # Columna 4: Código Componente (si existe, sino la que esté cerca o la 1)
+  col_comp_idx = 4 if num_cols > 4 else 1
+  # Columna 5: Descripción Componente
+  col_desc_idx = 5 if num_cols > 5 else col_comp_idx
+  # Columna 6: Cantidad
+  col_cant_idx = 6 if num_cols > 6 else (num_cols - 1)
 
   resultados = []
-  for _, row in matches.iterrows():
-    c_comp = str(row.get(col_cod_comp, "")).strip()
-    d_comp = str(row.get(col_desc_comp, c_comp)).strip()
+  for _, row in df_receta.iterrows():
+    val_prod = str(row.iloc[col_prod_idx]).strip().upper()
     
-    if not c_comp or c_comp.upper() in ["NAN", "NONE", ""]:
-      continue
+    # Verificamos si hace match exacto o parcial con el código buscado
+    if codigo_buscado in val_prod or val_prod == codigo_buscado:
+      c_comp = str(row.iloc[col_comp_idx]).strip()
+      d_comp = str(row.iloc[col_desc_idx]).strip()
+      
+      if not c_comp or c_comp.upper() in ["NAN", "NONE", "", "NAT"]:
+        continue
 
-    cant_base = 1.0
-    if col_cant:
+      # Extraer cantidad de forma segura
+      cant_base = 1.0
       try:
-        cant_base = float(row.get(col_cant, 1.0))
-      except (TypeError, ValueError):
+        val_cant = row.iloc[col_cant_idx]
+        cant_base = float(val_cant) if pd.notna(val_cant) else 1.0
+      except (TypeError, ValueError, IndexError):
         cant_base = 1.0
 
-    cant_total = cant_base * float(cajas)
-    resultados.append({
-        "Código Componente": c_comp,
-        "Descripción Componente": d_comp,
-        "Cantidad": cant_total
-    })
+      cant_total = cant_base * float(cajas)
+      resultados.append({
+          "Código Componente": c_comp,
+          "Descripción Componente": d_comp if d_comp and d_comp.upper() != "NAN" else c_comp,
+          "Cantidad": cant_total
+      })
 
-  return pd.DataFrame(resultados).drop_duplicates().reset_index(drop=True)
+  df_res = pd.DataFrame(resultados)
+  if df_res.empty:
+    return pd.DataFrame()
+    
+  return df_res.drop_duplicates().reset_index(drop=True)
 
 
 def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
