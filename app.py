@@ -395,7 +395,7 @@ def calcular_avance(
 
 
 def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=None) -> pd.DataFrame:
-  """Extrae los componentes buscando el código en cualquier columna y detectando las columnas de insumos de forma dinámica."""
+  """Extrae los componentes usando los nombres exactos de las columnas de tu Excel."""
   try:
     if archivo_subido is not None:
       xl = pd.ExcelFile(archivo_subido)
@@ -410,61 +410,47 @@ def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=
   if df_receta.empty:
     return pd.DataFrame()
 
-  # Limpiar nombres de columnas
+  # Normalizar nombres de columnas del DataFrame a mayúsculas para evitar errores
   df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
+  
+  # Identificar la columna del código principal (Columna A: CÓDIGO)
+  col_codigo = 'CÓDIGO' if 'CÓDIGO' in df_receta.columns else df_receta.columns[0]
+  
+  # Limpiar el código buscado y la columna del DataFrame
+  df_receta['__COD_LIMPIO'] = df_receta[col_codigo].fillna('').astype(str).str.strip().str.upper()
   codigo_buscado = str(codigo_prod).strip().upper()
 
-  # 1. Encontrar qué filas contienen el código del producto en CUALQUIER columna
-  filas_match = []
-  for idx, row in df_receta.iterrows():
-    encontrado_en_fila = False
-    for val in row.values:
-      val_str = str(val).strip().upper()
-      if codigo_buscado in val_str and val_str not in ["NAN", "NONE", ""]:
-        encontrado_en_fila = True
-        break
-    if encontrado_en_fila:
-      filas_match.append(idx)
-
-  if not filas_match:
+  # Filtrar las filas que coincidan con el código
+  matches = df_receta[df_receta['__COD_LIMPIO'] == codigo_buscado]
+  if matches.empty:
     return pd.DataFrame()
 
-  matches = df_receta.loc[filas_match]
-
-  # 2. Detectar de forma inteligente las columnas de componentes (buscando texto o usando las últimas columnas disponibles)
-  cols = list(df_receta.columns)
-  
-  # Intentar ubicar columnas que parezcan código de componente o descripción
-  col_cod_comp = cols[1] if len(cols) > 1 else cols[0]
-  col_desc_comp = cols[2] if len(cols) > 2 else col_cod_comp
-  col_cant = cols[3] if len(cols) > 3 else None
-
-  # Buscar si hay alguna columna con nombres específicos
-  for c in cols:
-    if any(k in c for k in ["COMP", "INSUMO", "MAT", "ARTICULO"]):
-      col_cod_comp = c
-    if any(k in c for k in ["DESC", "NOMBRE", "DETALLE"]):
-      col_desc_comp = c
-    if any(k in c for k in ["CANT", "REQ", "CONSUMO", "DOSIS"]):
-      col_cant = c
+  # Ubicar exactamente las columnas según tu Excel:
+  # COD COMP (Columna E), COMPONENTE (Columna F), CANTIDAD (Columna G)
+  col_cod_comp = 'COD COMP' if 'COD COMP' in df_receta.columns else df_receta.columns[4]
+  col_desc_comp = 'COMPONENTE' if 'COMPONENTE' in df_receta.columns else df_receta.columns[5]
+  col_cant = 'CANTIDAD' if 'CANTIDAD' in df_receta.columns else df_receta.columns[7]
 
   resultados = []
   for _, row in matches.iterrows():
-    c_comp = str(row.get(col_cod_comp, "")).strip()
+    c_comp = str(row.get(col_cod_comp, '')).strip()
     d_comp = str(row.get(col_desc_comp, c_comp)).strip()
     
-    if not c_comp or c_comp.upper() in ["NAN", "NONE", "", "NAT"] or c_comp.upper() == codigo_buscado:
+    if not c_comp or c_comp.upper() in ['NAN', 'NONE', '', 'NAT']:
       continue
 
+    # Obtener la cantidad base del Excel
     cant_base = 1.0
-    if col_cant is not None:
-      try:
-        val_cant = row.get(col_cant, 1.0)
-        cant_base = float(val_cant) if pd.notna(val_cant) else 1.0
-      except (TypeError, ValueError):
-        cant_base = 1.0
+    try:
+      val_cant = row.get(col_cant, 1.0)
+      if pd.notna(val_cant):
+        cant_base = float(val_cant)
+    except (TypeError, ValueError):
+      cant_base = 1.0
 
+    # Multiplicar por las cajas seleccionadas
     cant_total = cant_base * float(cajas)
+    
     resultados.append({
         "Código Componente": c_comp,
         "Descripción Componente": d_comp if d_comp and d_comp.upper() != "NAN" else c_comp,
