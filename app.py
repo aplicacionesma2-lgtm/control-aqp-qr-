@@ -388,8 +388,8 @@ def calcular_avance(
   return df.sort_values("pct_avance")
 
 
-def obtener_componentes_producto(codigo_prod: str, archivo_subido=None) -> pd.DataFrame:
-  """Extrae los componentes de la hoja 'Receta' buscando en cualquier columna el código."""
+def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=None) -> pd.DataFrame:
+  """Extrae los componentes de la hoja 'Receta' para el código de producto y escala por las cajas."""
   try:
     if archivo_subido is not None:
       xl = pd.ExcelFile(archivo_subido)
@@ -404,34 +404,46 @@ def obtener_componentes_producto(codigo_prod: str, archivo_subido=None) -> pd.Da
   df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
   codigo_buscado = str(codigo_prod).strip().upper()
   
-  # Buscar filas donde cualquier columna coincida con el código del producto
-  matches = pd.DataFrame()
-  for col in df_receta.columns:
-    mask = df_receta[col].fillna("").astype(str).str.strip().str.upper() == codigo_buscado
-    if mask.any():
-      matches = df_receta[mask]
-      break
-
+  # Identificar columna principal del código del producto en Receta
+  col_prod = next((c for c in df_receta.columns if "CÓDIGO" in c or "CODIGO" in c or "COD_PROD" in c), df_receta.columns[0])
+  
+  # Filtrar filas de la receta que corresponden a este producto
+  matches = df_receta[df_receta[col_prod].fillna("").astype(str).str.strip().str.upper() == codigo_buscado]
   if matches.empty:
     return pd.DataFrame()
 
-  # Identificar columnas de componentes / insumos
+  # Identificar columnas de componentes, descripciones y cantidades
   col_cod_comp = next((c for c in df_receta.columns if "COD" in c and ("COMP" in c or "INSUMO" in c)), None)
-  col_desc_comp = next((c for c in df_receta.columns if "DESC" in c and ("COMP" in c or "INSUMO" in c)), None)
-  
   if not col_cod_comp:
     cols_candidatas = [c for c in df_receta.columns if "COMP" in c or "INSUMO" in c]
     col_cod_comp = cols_candidatas[0] if cols_candidatas else df_receta.columns[1] if len(df_receta.columns) > 1 else df_receta.columns[0]
     
-  if not col_desc_comp:
-    cols_desc = [c for c in df_receta.columns if "DESC" in c or "NOMBRE" in c]
-    col_desc_comp = cols_desc[0] if cols_desc else col_cod_comp
+  col_desc_comp = next((c for c in df_receta.columns if "DESC" in c or "NOMBRE" in c or "INSUMO" in c), col_cod_comp)
+  
+  # Buscar columna de cantidad base si existe
+  col_cant = next((c for c in df_receta.columns if "CANT" in c or "QTY" in c or "UNID" in c), None)
 
-  resultado = pd.DataFrame({
-      "Código Componente": matches[col_cod_comp].astype(str),
-      "Descripción Componente": matches[col_desc_comp].astype(str)
-  })
-  return resultado.drop_duplicates().reset_index(drop=True)
+  resultados = []
+  for _, row in matches.iterrows():
+    c_comp = str(row.get(col_cod_comp, "")).strip()
+    d_comp = str(row.get(col_desc_comp, c_comp)).strip()
+    
+    # Calcular cantidad escalada por cajas si hay columna de cantidad, de lo contrario usar factor/cajas o 1 por defecto
+    cant_base = 1.0
+    if col_cant:
+      try:
+        cant_base = float(row.get(col_cant, 1.0))
+      except (TypeError, ValueError):
+        cant_base = 1.0
+    
+    cant_total = cant_base * float(cajas)
+    resultados.append({
+        "Código Componente": c_comp,
+        "Descripción Componente": d_comp,
+        "Cantidad": cant_total
+    })
+
+  return pd.DataFrame(resultados).drop_duplicates().reset_index(drop=True)
 
 
 def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
@@ -677,20 +689,23 @@ try:
             )
 
         st.markdown(f"**Producto:** {prod} (`{codigo_actual}`)")
-        
-        # --- DESGLOSE AUTOMÁTICO DE COMPONENTES DE LA RECETA ---
-        if "archivo_bytes_actual" in st.session_state:
-          df_comp_prod = obtener_componentes_producto(
-              codigo_actual, 
-              io.BytesIO(st.session_state["archivo_bytes_actual"])
-          )
-          if not df_comp_prod.empty:
-            with st.expander("🧪 Ver componentes / insumos de este producto", expanded=True):
-              st.dataframe(df_comp_prod, use_container_width=True, hide_index=True)
+        st.markdown(f"**Factor:** {fmt_num(factor)}")
 
         cajas = st.number_input("Cajas", min_value=0.0, value=1.0, step=1.0)
         unidades = cajas * float(factor)
         st.caption(f"= {fmt_num(unidades)} {umi}")
+
+        # --- DESGLOSE DETALLADO DE COMPONENTES DE LA RECETA ---
+        if "archivo_bytes_actual" in st.session_state:
+          df_comp_prod = obtener_componentes_producto(
+              codigo_actual, 
+              cajas,
+              io.BytesIO(st.session_state["archivo_bytes_actual"])
+          )
+          if not df_comp_prod.empty:
+            st.markdown("### 📋 Componentes / Insumos:")
+            for _, r in df_comp_prod.iterrows():
+              st.markdown(f"- **{r['Código Componente']}** {r['Descripción Componente']} **({fmt_num(r['Cantidad'])})**")
 
         if st.button("✅ Registrar entrega", type="primary"):
           registrar_escaneo(
