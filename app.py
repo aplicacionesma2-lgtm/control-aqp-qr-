@@ -389,7 +389,7 @@ def calcular_avance(
 
 
 def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=None) -> pd.DataFrame:
-  """Extrae los componentes de la hoja 'Receta' para el código de producto y escala por las cajas."""
+  """Extrae los componentes de la hoja 'Receta' haciendo match exacto con el código del producto."""
   try:
     if archivo_subido is not None:
       xl = pd.ExcelFile(archivo_subido)
@@ -401,41 +401,62 @@ def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=
   except Exception:
     return pd.DataFrame()
 
+  if df_receta.empty:
+    return pd.DataFrame()
+
+  # Limpiar nombres de columnas y datos
   df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
   codigo_buscado = str(codigo_prod).strip().upper()
-  
-  # Identificar columna principal del código del producto en Receta
-  col_prod = next((c for c in df_receta.columns if "CÓDIGO" in c or "CODIGO" in c or "COD_PROD" in c), df_receta.columns[0])
-  
-  # Filtrar filas de la receta que corresponden a este producto
-  matches = df_receta[df_receta[col_prod].fillna("").astype(str).str.strip().str.upper() == codigo_buscado]
+
+  # Buscar la columna que contiene el código del producto principal en la hoja Receta
+  # (comúnmente llamada CÓDIGO, COD_PROD, ARTICULO, etc.)
+  col_prod = next(
+      (c for c in df_receta.columns if any(k in c for k in ["CÓDIGO", "CODIGO", "PROD", "ART"])),
+      df_receta.columns[0]
+  )
+
+  # Normalizar la columna de productos para el match
+  df_receta[col_prod] = df_receta[col_prod].fillna("").astype(str).str.strip().str.upper()
+
+  # Filtrar estrictamente por el producto buscado
+  matches = df_receta[df_receta[col_prod] == codigo_buscado]
   if matches.empty:
     return pd.DataFrame()
 
-  # Identificar columnas de componentes, descripciones y cantidades
-  col_cod_comp = next((c for c in df_receta.columns if "COD" in c and ("COMP" in c or "INSUMO" in c)), None)
-  if not col_cod_comp:
-    cols_candidatas = [c for c in df_receta.columns if "COMP" in c or "INSUMO" in c]
-    col_cod_comp = cols_candidatas[0] if cols_candidatas else df_receta.columns[1] if len(df_receta.columns) > 1 else df_receta.columns[0]
-    
-  col_desc_comp = next((c for c in df_receta.columns if "DESC" in c or "NOMBRE" in c or "INSUMO" in c), col_cod_comp)
-  
-  # Buscar columna de cantidad base si existe
-  col_cant = next((c for c in df_receta.columns if "CANT" in c or "QTY" in c or "UNID" in c), None)
+  # Identificar la columna del código del componente / insumo
+  col_cod_comp = next(
+      (c for c in df_receta.columns if any(k in c for k in ["COMPONENTE", "INSUMO", "MATERIA", "HIJO"])),
+      df_receta.columns[1] if len(df_receta.columns) > 1 else df_receta.columns[0]
+  )
+
+  # Identificar la columna de descripción del componente
+  col_desc_comp = next(
+      (c for c in df_receta.columns if any(k in c for k in ["DESCRIPCIÓN", "DESCRIPCION", "NOMBRE", "DETALLE"]) and c != col_prod),
+      col_cod_comp
+  )
+
+  # Identificar la columna de cantidad base
+  col_cant = next(
+      (c for c in df_receta.columns if any(k in c for k in ["CANT", "QTY", "UNID", "CONSUMO"])),
+      None
+  )
 
   resultados = []
   for _, row in matches.iterrows():
     c_comp = str(row.get(col_cod_comp, "")).strip()
     d_comp = str(row.get(col_desc_comp, c_comp)).strip()
     
-    # Calcular cantidad escalada por cajas si hay columna de cantidad, de lo contrario usar factor/cajas o 1 por defecto
+    # Omitir filas vacías
+    if not c_comp or c_comp.upper() == "NAN":
+      continue
+
     cant_base = 1.0
     if col_cant:
       try:
         cant_base = float(row.get(col_cant, 1.0))
       except (TypeError, ValueError):
         cant_base = 1.0
-    
+
     cant_total = cant_base * float(cajas)
     resultados.append({
         "Código Componente": c_comp,
