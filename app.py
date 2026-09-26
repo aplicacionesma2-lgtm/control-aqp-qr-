@@ -395,7 +395,7 @@ def calcular_avance(
 
 
 def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=None) -> pd.DataFrame:
-  """Extrae los componentes de la hoja 'Receta' haciendo match flexible y seguro de tipos."""
+  """Busca los componentes escaneando todas las columnas de la hoja 'Receta' para evitar errores de posición."""
   try:
     if archivo_subido is not None:
       xl = pd.ExcelFile(archivo_subido)
@@ -410,20 +410,18 @@ def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=
   if df_receta.empty:
     return pd.DataFrame()
 
-  # Normalizar nombres de columnas a mayúsculas
+  # Limpiar nombres de columnas
   df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
-  
-  # Tomar la primera columna como la del código del producto principal y convertirla estrictamente a texto limpio
-  col_prod = df_receta.columns[0]
-  df_receta[col_prod] = df_receta[col_prod].fillna("").astype(str).str.strip().str.upper()
-
-  # Limpiar el código buscado
   codigo_buscado = str(codigo_prod).strip().upper()
 
-  # Buscar coincidencia exacta o parcial
-  matches = df_receta[df_receta[col_prod] == codigo_buscado]
-  if matches.empty:
-    matches = df_receta[df_receta[col_prod].str.contains(codigo_buscado, na=False)]
+  # Buscar en qué filas aparece el código buscado en CUALQUIER columna del DataFrame
+  mask = pd.DataFrame(False, index=df_receta.index, columns=[0])
+  for col in df_receta.columns:
+    serie_str = df_receta[col].fillna("").astype(str).str.strip().str.upper()
+    match_col = (serie_str == codigo_buscado) | (serie_str.str.contains(codigo_buscado, na=False))
+    mask[0] = mask[0] | match_col
+
+  matches = df_receta[mask[0]]
   if matches.empty:
     return pd.DataFrame()
 
