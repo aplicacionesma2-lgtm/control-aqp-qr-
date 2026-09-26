@@ -131,6 +131,7 @@ HISTORIAL_CIERRES_HEADERS = [
     "total_registros",
     "total_unidades",
 ]
+RECETA_DETALLE_HEADERS = ["cod_padre", "cod_componente", "componente", "cantidad"]
 
 
 @st.cache_resource
@@ -219,6 +220,18 @@ def guardar_pedido(
       _rows_seguras(c, CATALOGO_HEADERS, {"factor"}), value_input_option="RAW"
   )
 
+  rd = receta_df[["CÓDIGO", "COD COMPONENTE", "COMPONENTE", "CANTIDAD"]].copy()
+  rd.columns = RECETA_DETALLE_HEADERS
+  rd["cod_padre"] = rd["cod_padre"].astype(str).str.strip()
+  rd["cod_componente"] = rd["cod_componente"].astype(str).str.strip()
+
+  ws_receta_detalle = get_ws("RecetaDetalle", tuple(RECETA_DETALLE_HEADERS))
+  ws_receta_detalle.clear()
+  ws_receta_detalle.append_row(RECETA_DETALLE_HEADERS, value_input_option="RAW")
+  ws_receta_detalle.append_rows(
+      _rows_seguras(rd, RECETA_DETALLE_HEADERS, {"cantidad"}), value_input_option="RAW"
+  )
+
   fl_headers = ["codigo", "descripcion", "factor"]
   ws_factor = get_ws("FactorLima", tuple(fl_headers))
   ws_factor.clear()
@@ -250,6 +263,15 @@ def cargar_pedido():
         pd.DataFrame(columns=CATALOGO_HEADERS),
         pd.DataFrame(),
     )
+
+
+@st.cache_data(ttl=5)
+def cargar_receta_detalle():
+  try:
+    ws = get_ws("RecetaDetalle", tuple(RECETA_DETALLE_HEADERS))
+    return _sheet_a_df(ws, RECETA_DETALLE_HEADERS, {"cantidad"})
+  except Exception:
+    return pd.DataFrame(columns=RECETA_DETALLE_HEADERS)
 
 
 @st.cache_data(ttl=3)
@@ -394,63 +416,32 @@ def calcular_avance(
   return df.sort_values("pct_avance")
 
 
-def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=None) -> pd.DataFrame:
-  """Extrae los componentes usando los nombres exactos de las columnas de tu Excel."""
-  try:
-    if archivo_subido is not None:
-      xl = pd.ExcelFile(archivo_subido)
-      if "Receta" not in xl.sheet_names:
-        return pd.DataFrame()
-      df_receta = xl.parse("Receta")
-    else:
-      return pd.DataFrame()
-  except Exception:
+def obtener_componentes_producto(codigo_prod: str, cajas: float, receta_detalle_df: pd.DataFrame) -> pd.DataFrame:
+  """Busca los componentes del código en la Receta ya guardada en Google Sheets
+  (persistente: funciona en cualquier celular, no solo en el que subió el Excel)."""
+  if receta_detalle_df is None or receta_detalle_df.empty:
     return pd.DataFrame()
 
-  if df_receta.empty:
-    return pd.DataFrame()
-
-  # Normalizar nombres de columnas del DataFrame a mayúsculas para evitar errores
-  df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
-  
-  # Identificar la columna del código principal (Columna A: CÓDIGO)
-  col_codigo = 'CÓDIGO' if 'CÓDIGO' in df_receta.columns else df_receta.columns[0]
-  
-  # Limpiar el código buscado y la columna del DataFrame
-  df_receta['__COD_LIMPIO'] = df_receta[col_codigo].fillna('').astype(str).str.strip().str.upper()
   codigo_buscado = str(codigo_prod).strip().upper()
-
-  # Filtrar las filas que coincidan con el código
-  matches = df_receta[df_receta['__COD_LIMPIO'] == codigo_buscado]
+  matches = receta_detalle_df[receta_detalle_df["cod_padre"].str.upper() == codigo_buscado]
   if matches.empty:
     return pd.DataFrame()
 
-  # Ubicar exactamente las columnas según tu Excel:
-  # COD COMP (Columna E), COMPONENTE (Columna F), CANTIDAD (Columna G)
-  col_cod_comp = 'COD COMP' if 'COD COMP' in df_receta.columns else df_receta.columns[4]
-  col_desc_comp = 'COMPONENTE' if 'COMPONENTE' in df_receta.columns else df_receta.columns[5]
-  col_cant = 'CANTIDAD' if 'CANTIDAD' in df_receta.columns else df_receta.columns[7]
-
   resultados = []
   for _, row in matches.iterrows():
-    c_comp = str(row.get(col_cod_comp, '')).strip()
-    d_comp = str(row.get(col_desc_comp, c_comp)).strip()
-    
-    if not c_comp or c_comp.upper() in ['NAN', 'NONE', '', 'NAT']:
+    c_comp = str(row.get("cod_componente", "")).strip()
+    d_comp = str(row.get("componente", c_comp)).strip()
+
+    if not c_comp or c_comp.upper() in ["NAN", "NONE", "", "NAT"]:
       continue
 
-    # Obtener la cantidad base del Excel
-    cant_base = 1.0
     try:
-      val_cant = row.get(col_cant, 1.0)
-      if pd.notna(val_cant):
-        cant_base = float(val_cant)
+      cant_base = float(row.get("cantidad", 1.0)) if pd.notna(row.get("cantidad")) else 1.0
     except (TypeError, ValueError):
       cant_base = 1.0
 
-    # Multiplicar por las cajas seleccionadas
     cant_total = cant_base * float(cajas)
-    
+
     resultados.append({
         "Código Componente": c_comp,
         "Descripción Componente": d_comp if d_comp and d_comp.upper() != "NAN" else c_comp,
@@ -653,6 +644,7 @@ try:
 
   registros_df = cargar_registros()
   avance_df = calcular_avance(pedido_df, registros_df)
+  receta_detalle_df = cargar_receta_detalle()
 
   st.title("📦 Control de Empaque QR — María Almenara")
   
@@ -711,13 +703,7 @@ try:
         st.markdown("---")
         st.markdown("### 📋 Componentes / Insumos de la Receta:")
         
-        df_comp_prod = pd.DataFrame()
-        if "archivo_bytes_actual" in st.session_state:
-          df_comp_prod = obtener_componentes_producto(
-              codigo_actual, 
-              cajas,
-              io.BytesIO(st.session_state["archivo_bytes_actual"])
-          )
+        df_comp_prod = obtener_componentes_producto(codigo_actual, cajas, receta_detalle_df)
 
         if not df_comp_prod.empty:
           for _, r in df_comp_prod.iterrows():
