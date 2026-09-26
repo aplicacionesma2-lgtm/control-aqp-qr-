@@ -40,7 +40,6 @@ with st.sidebar:
   )
   st.markdown("---")
 
-# Paletas de colores adaptativas con acento corporativo de María Almenara (Rosa/Fucsia: #D4145A)
 if st.session_state["tema"] == "Oscuro":
   C_BG = "#1A252F"
   C_SIDEBAR = "#11181E"
@@ -353,6 +352,13 @@ def cerrar_pedido_semanal(operario_actual):
   return True, id_cierre
 
 
+def reiniciar_registros():
+  ws = get_ws("Registros", tuple(REGISTROS_HEADERS))
+  ws.clear()
+  ws.append_row(list(REGISTROS_HEADERS), value_input_option="RAW")
+  st.cache_data.clear()
+
+
 def calcular_avance(
     pedido_df: pd.DataFrame, registros_df: pd.DataFrame
 ) -> pd.DataFrame:
@@ -404,49 +410,25 @@ def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=
   if df_receta.empty:
     return pd.DataFrame()
 
-  # Limpiar nombres de columnas y datos
   df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
   codigo_buscado = str(codigo_prod).strip().upper()
 
-  # Buscar la columna que contiene el código del producto principal en la hoja Receta
-  # (comúnmente llamada CÓDIGO, COD_PROD, ARTICULO, etc.)
-  col_prod = next(
-      (c for c in df_receta.columns if any(k in c for k in ["CÓDIGO", "CODIGO", "PROD", "ART"])),
-      df_receta.columns[0]
-  )
-
-  # Normalizar la columna de productos para el match
+  col_prod = "CÓDIGO" if "CÓDIGO" in df_receta.columns else df_receta.columns[0]
   df_receta[col_prod] = df_receta[col_prod].fillna("").astype(str).str.strip().str.upper()
 
-  # Filtrar estrictamente por el producto buscado
   matches = df_receta[df_receta[col_prod] == codigo_buscado]
   if matches.empty:
     return pd.DataFrame()
 
-  # Identificar la columna del código del componente / insumo
-  col_cod_comp = next(
-      (c for c in df_receta.columns if any(k in c for k in ["COMPONENTE", "INSUMO", "MATERIA", "HIJO"])),
-      df_receta.columns[1] if len(df_receta.columns) > 1 else df_receta.columns[0]
-  )
-
-  # Identificar la columna de descripción del componente
-  col_desc_comp = next(
-      (c for c in df_receta.columns if any(k in c for k in ["DESCRIPCIÓN", "DESCRIPCION", "NOMBRE", "DETALLE"]) and c != col_prod),
-      col_cod_comp
-  )
-
-  # Identificar la columna de cantidad base
-  col_cant = next(
-      (c for c in df_receta.columns if any(k in c for k in ["CANT", "QTY", "UNID", "CONSUMO"])),
-      None
-  )
+  col_cod_comp = "COD COMPONENTE" if "COD COMPONENTE" in df_receta.columns else df_receta.columns[4]
+  col_desc_comp = "COMPONENTE" if "COMPONENTE" in df_receta.columns else df_receta.columns[5]
+  col_cant = "CANTIDAD" if "CANTIDAD" in df_receta.columns else None
 
   resultados = []
   for _, row in matches.iterrows():
     c_comp = str(row.get(col_cod_comp, "")).strip()
     d_comp = str(row.get(col_desc_comp, c_comp)).strip()
     
-    # Omitir filas vacías
     if not c_comp or c_comp.upper() == "NAN":
       continue
 
@@ -483,26 +465,23 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
   df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
   df_factor.columns = [str(c).strip().upper() for c in df_factor.columns]
 
-  col_req_data = next((c for c in df_data.columns if "REQUERIMIENTO" in c), "REQUERIMIENTO")
-  col_cod_data = next((c for c in df_data.columns if "CÓDIGO" in c or "CODIGO" in c), "CÓDIGO")
+  col_req_data = "REQUERIMIENTO" if "REQUERIMIENTO" in df_data.columns else df_data.columns[4]
+  col_cod_data = "CÓDIGO" if "CÓDIGO" in df_data.columns else df_data.columns[0]
 
   df_data_limpio = df_data[[col_cod_data, col_req_data]].copy()
   df_data_limpio.columns = ["CÓDIGO_PROD", "REQ_REAL"]
   df_data_limpio["REQ_REAL"] = pd.to_numeric(df_data_limpio["REQ_REAL"], errors="coerce").fillna(0)
   df_data_limpio["CÓDIGO_PROD"] = df_data_limpio["CÓDIGO_PROD"].fillna("").astype(str).str.strip()
 
-  col_cod_receta = next((c for c in df_receta.columns if "CÓDIGO" in c or "CODIGO" in c), "CÓDIGO")
-  col_cod_comp = next((c for c in df_receta.columns if "COD" in c and ("COMPONENTE" in c or "COMP" in c)), None)
-  col_desc_comp = next((c for c in df_receta.columns if c != col_cod_comp and "COMPONENTE" in c), None)
-
-  if not col_cod_comp:
-    col_cod_comp = next((c for c in df_receta.columns if "COMPONENTE" in c), df_receta.columns[1])
-  if not col_desc_comp:
-    col_desc_comp = col_cod_comp
+  col_cod_receta = "CÓDIGO" if "CÓDIGO" in df_receta.columns else df_receta.columns[0]
+  col_cod_comp = "COD COMPONENTE" if "COD COMPONENTE" in df_receta.columns else df_receta.columns[4]
+  col_desc_comp = "COMPONENTE" if "COMPONENTE" in df_receta.columns else df_receta.columns[5]
+  col_cant_receta = "CANTIDAD" if "CANTIDAD" in df_receta.columns else df_receta.columns[6]
 
   df_receta[col_cod_receta] = df_receta[col_cod_receta].fillna("").astype(str).str.strip()
   df_receta[col_cod_comp] = df_receta[col_cod_comp].fillna("").astype(str).str.strip()
   df_receta[col_desc_comp] = df_receta[col_desc_comp].fillna("").astype(str).str.strip()
+  df_receta[col_cant_receta] = pd.to_numeric(df_receta[col_cant_receta], errors="coerce").fillna(1.0)
 
   df_merged = pd.merge(
       df_receta,
@@ -512,7 +491,7 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       how="inner",
   )
 
-  df_merged["REQ_COMPONENTE"] = df_merged["REQ_REAL"]
+  df_merged["REQ_COMPONENTE"] = df_merged[col_cant_receta] * df_merged["REQ_REAL"]
 
   s_cod = df_merged[col_cod_comp]
   df_m = df_merged[
@@ -526,8 +505,9 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       df_m[col_desc_comp] == "", df_m["CÓDIGO_EXTRACTO"]
   )
 
-  col_cod_f = next((c for c in df_factor.columns if "COD" in c), df_factor.columns[0])
-  col_fac_f = next((c for c in df_factor.columns if "FACTOR" in c), df_factor.columns[-1])
+  col_cod_f = "CÓDIGO" if "CÓDIGO" in df_factor.columns else df_factor.columns[0]
+  col_fac_f = "FACTOR" if "FACTOR" in df_factor.columns else df_factor.columns[-1]
+  
   df_factor = df_factor.rename(columns={col_cod_f: "CÓDIGO_LIMA", col_fac_f: "FACTOR_VALOR"})
   df_factor["CÓDIGO_LIMA"] = df_factor["CÓDIGO_LIMA"].fillna("").astype(str).str.strip()
 
