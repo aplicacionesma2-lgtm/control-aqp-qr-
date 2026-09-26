@@ -395,7 +395,7 @@ def calcular_avance(
 
 
 def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=None) -> pd.DataFrame:
-  """Extrae los componentes de la hoja 'Receta' haciendo match flexible con el código del producto."""
+  """Extrae los componentes de la hoja 'Receta' usando los nombres exactos de tus columnas."""
   try:
     if archivo_subido is not None:
       xl = pd.ExcelFile(archivo_subido)
@@ -410,22 +410,28 @@ def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=
   if df_receta.empty:
     return pd.DataFrame()
 
+  # Normalizar cabeceras a mayúsculas
   df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
   codigo_buscado = str(codigo_prod).strip().upper()
 
-  col_prod = df_receta.columns[0]
+  # Identificar la columna del código de producto (usualmente la primera o 'CÓDIGO')
+  col_prod = "CÓDIGO" if "CÓDIGO" in df_receta.columns else df_receta.columns[0]
+  
+  # Limpiar datos de la columna para asegurar el match
   df_receta[col_prod] = df_receta[col_prod].fillna("").astype(str).str.strip().str.upper()
 
+  # Filtrar filas que coincidan con el código del producto
   matches = df_receta[df_receta[col_prod] == codigo_buscado]
   if matches.empty:
     matches = df_receta[df_receta[col_prod].str.contains(codigo_buscado, na=False)]
+  
   if matches.empty:
     return pd.DataFrame()
 
-  num_cols = df_receta.shape[1]
-  col_cod_comp = df_receta.columns[4] if num_cols > 4 else df_receta.columns[1]
-  col_desc_comp = df_receta.columns[5] if num_cols > 5 else col_cod_comp
-  col_cant = df_receta.columns[6] if num_cols > 6 else None
+  # Identificar nombres de columnas de componentes según tu estructura real
+  col_cod_comp = next((c for c in df_receta.columns if "COD COMP" in c or "COD_COMP" in c or "COMPONENTE" in c), df_receta.columns[4] if len(df_receta.columns) > 4 else df_receta.columns[1])
+  col_desc_comp = next((c for c in df_receta.columns if c == "COMPONENTE" or ("COMP" in c and c != col_cod_comp)), df_receta.columns[5] if len(df_receta.columns) > 5 else col_cod_comp)
+  col_cant = next((c for c in df_receta.columns if "CANTIDAD" in c or "CANT" in c), df_receta.columns[6] if len(df_receta.columns) > 6 else None)
 
   resultados = []
   for _, row in matches.iterrows():
