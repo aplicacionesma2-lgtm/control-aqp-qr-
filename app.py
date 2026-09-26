@@ -1,6 +1,6 @@
 """
-Control de Empaque Sede AREQUIPA
-================================
+Control de Empaque QR — María Almenara
+========================================
 """
 
 from datetime import datetime, timezone, timedelta
@@ -12,12 +12,13 @@ from google.oauth2.service_account import Credentials
 import gspread
 from PIL import Image, ImageDraw, ImageFont
 import pandas as pd
+import streamlit as streamlit_mod
 import streamlit as st
 from streamlit_qrcode_scanner import qrcode_scanner
 import qrcode
 
 st.set_page_config(
-    page_title="Control de Empaque Sede AREQUIPA",
+    page_title="Control de Empaque QR — María Almenara",
     page_icon="📦",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -388,6 +389,43 @@ def calcular_avance(
   return df.sort_values("pct_avance")
 
 
+def obtener_componentes_producto(codigo_prod: str, archivo_subido=None) -> pd.DataFrame:
+  """Extrae los componentes de la hoja 'Receta' asociados al código escaneado."""
+  try:
+    if archivo_subido is not None:
+      xl = pd.ExcelFile(archivo_subido)
+      if "Receta" not in xl.sheet_names:
+        return pd.DataFrame()
+      df_receta = xl.parse("Receta")
+    else:
+      return pd.DataFrame()
+  except Exception:
+    return pd.DataFrame()
+
+  df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
+  col_cod_receta = next((c for c in df_receta.columns if "CÓDIGO" in c or "CODIGO" in c), df_receta.columns[0])
+  col_cod_comp = next((c for c in df_receta.columns if "COD" in c and ("COMPONENTE" in c or "COMP" in c)), None)
+  col_desc_comp = next((c for c in df_receta.columns if c != col_cod_comp and "COMPONENTE" in c), None)
+
+  if not col_cod_comp:
+    col_cod_comp = next((c for c in df_receta.columns if "COMPONENTE" in c), df_receta.columns[1])
+  if not col_desc_comp:
+    col_desc_comp = col_cod_comp
+
+  df_receta[col_cod_receta] = df_receta[col_cod_receta].fillna("").astype(str).str.strip()
+  
+  # Filtrar por el código exacto
+  df_prod_receta = df_receta[df_receta[col_cod_receta] == str(codigo_prod).strip().upper()].copy()
+  if df_prod_receta.empty:
+    return pd.DataFrame()
+
+  resultado = pd.DataFrame({
+      "Código Componente": df_prod_receta[col_cod_comp].astype(str),
+      "Descripción Componente": df_prod_receta[col_desc_comp].astype(str)
+  })
+  return resultado.drop_duplicates().reset_index(drop=True)
+
+
 def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
   try:
     if archivo_subido is not None:
@@ -404,60 +442,26 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
   df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
   df_factor.columns = [str(c).strip().upper() for c in df_factor.columns]
 
-  col_req_data = next(
-      (c for c in df_data.columns if "REQUERIMIENTO" in c), "REQUERIMIENTO"
-  )
-  col_cod_data = next(
-      (c for c in df_data.columns if "CÓDIGO" in c or "CODIGO" in c), "CÓDIGO"
-  )
+  col_req_data = next((c for c in df_data.columns if "REQUERIMIENTO" in c), "REQUERIMIENTO")
+  col_cod_data = next((c for c in df_data.columns if "CÓDIGO" in c or "CODIGO" in c), "CÓDIGO")
 
   df_data_limpio = df_data[[col_cod_data, col_req_data]].copy()
   df_data_limpio.columns = ["CÓDIGO_PROD", "REQ_REAL"]
-  df_data_limpio["REQ_REAL"] = (
-      pd.to_numeric(df_data_limpio["REQ_REAL"], errors="coerce").fillna(0)
-  )
-  df_data_limpio["CÓDIGO_PROD"] = (
-      df_data_limpio["CÓDIGO_PROD"].fillna("").astype(str).str.strip()
-  )
+  df_data_limpio["REQ_REAL"] = pd.to_numeric(df_data_limpio["REQ_REAL"], errors="coerce").fillna(0)
+  df_data_limpio["CÓDIGO_PROD"] = df_data_limpio["CÓDIGO_PROD"].fillna("").astype(str).str.strip()
 
-  col_cod_receta = next(
-      (c for c in df_receta.columns if "CÓDIGO" in c or "CODIGO" in c), "CÓDIGO"
-  )
-
-  col_cod_comp = next(
-      (
-          c
-          for c in df_receta.columns
-          if "COD" in c and ("COMPONENTE" in c or "COMP" in c)
-      ),
-      None,
-  )
-  col_desc_comp = next(
-      (
-          c
-          for c in df_receta.columns
-          if c != col_cod_comp and "COMPONENTE" in c
-      ),
-      None,
-  )
+  col_cod_receta = next((c for c in df_receta.columns if "CÓDIGO" in c or "CODIGO" in c), "CÓDIGO")
+  col_cod_comp = next((c for c in df_receta.columns if "COD" in c and ("COMPONENTE" in c or "COMP" in c)), None)
+  col_desc_comp = next((c for c in df_receta.columns if c != col_cod_comp and "COMPONENTE" in c), None)
 
   if not col_cod_comp:
-    col_cod_comp = next(
-        (c for c in df_receta.columns if "COMPONENTE" in c),
-        df_receta.columns[1],
-    )
+    col_cod_comp = next((c for c in df_receta.columns if "COMPONENTE" in c), df_receta.columns[1])
   if not col_desc_comp:
     col_desc_comp = col_cod_comp
 
-  df_receta[col_cod_receta] = (
-      df_receta[col_cod_receta].fillna("").astype(str).str.strip()
-  )
-  df_receta[col_cod_comp] = (
-      df_receta[col_cod_comp].fillna("").astype(str).str.strip()
-  )
-  df_receta[col_desc_comp] = (
-      df_receta[col_desc_comp].fillna("").astype(str).str.strip()
-  )
+  df_receta[col_cod_receta] = df_receta[col_cod_receta].fillna("").astype(str).str.strip()
+  df_receta[col_cod_comp] = df_receta[col_cod_comp].fillna("").astype(str).str.strip()
+  df_receta[col_desc_comp] = df_receta[col_desc_comp].fillna("").astype(str).str.strip()
 
   df_merged = pd.merge(
       df_receta,
@@ -481,18 +485,10 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       df_m[col_desc_comp] == "", df_m["CÓDIGO_EXTRACTO"]
   )
 
-  col_cod_f = next(
-      (c for c in df_factor.columns if "COD" in c), df_factor.columns[0]
-  )
-  col_fac_f = next(
-      (c for c in df_factor.columns if "FACTOR" in c), df_factor.columns[-1]
-  )
-  df_factor = df_factor.rename(
-      columns={col_cod_f: "CÓDIGO_LIMA", col_fac_f: "FACTOR_VALOR"}
-  )
-  df_factor["CÓDIGO_LIMA"] = (
-      df_factor["CÓDIGO_LIMA"].fillna("").astype(str).str.strip()
-  )
+  col_cod_f = next((c for c in df_factor.columns if "COD" in c), df_factor.columns[0])
+  col_fac_f = next((c for c in df_factor.columns if "FACTOR" in c), df_factor.columns[-1])
+  df_factor = df_factor.rename(columns={col_cod_f: "CÓDIGO_LIMA", col_fac_f: "FACTOR_VALOR"})
+  df_factor["CÓDIGO_LIMA"] = df_factor["CÓDIGO_LIMA"].fillna("").astype(str).str.strip()
 
   df_final = pd.merge(
       df_m,
@@ -501,35 +497,22 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       right_on="CÓDIGO_LIMA",
       how="left",
   )
-  df_final["FACTOR_LIMA"] = (
-      pd.to_numeric(df_final["FACTOR_VALOR"], errors="coerce").fillna(1.0)
-  )
-  df_final["FACTOR_LIMA"] = df_final["FACTOR_LIMA"].apply(
-      lambda x: x if x > 0 else 1.0
-  )
+  df_final["FACTOR_LIMA"] = pd.to_numeric(df_final["FACTOR_VALOR"], errors="coerce").fillna(1.0)
+  df_final["FACTOR_LIMA"] = df_final["FACTOR_LIMA"].apply(lambda x: x if x > 0 else 1.0)
 
   df_grouped = (
-      df_final.groupby(
-          ["CÓDIGO_EXTRACTO", "DESCRIPCIÓN_COMP", "FACTOR_LIMA"], as_index=False
-      )["REQ_COMPONENTE"]
+      df_final.groupby(["CÓDIGO_EXTRACTO", "DESCRIPCIÓN_COMP", "FACTOR_LIMA"], as_index=False)["REQ_COMPONENTE"]
       .sum()
       .rename(columns={"REQ_COMPONENTE": "REQ_TOTAL"})
   )
 
   df_grouped["REQ_REDONDEADO"] = df_grouped.apply(
-      lambda row: math.ceil(row["REQ_TOTAL"] / row["FACTOR_LIMA"])
-      * row["FACTOR_LIMA"],
+      lambda row: math.ceil(row["REQ_TOTAL"] / row["FACTOR_LIMA"]) * row["FACTOR_LIMA"],
       axis=1,
   )
 
   return (
-      df_grouped[[
-          "CÓDIGO_EXTRACTO",
-          "DESCRIPCIÓN_COMP",
-          "REQ_TOTAL",
-          "FACTOR_LIMA",
-          "REQ_REDONDEADO",
-      ]]
+      df_grouped[["CÓDIGO_EXTRACTO", "DESCRIPCIÓN_COMP", "REQ_TOTAL", "FACTOR_LIMA", "REQ_REDONDEADO"]]
       .rename(
           columns={
               "CÓDIGO_EXTRACTO": "CÓDIGO",
@@ -561,9 +544,7 @@ def generar_imagen_etiqueta(codigo, producto, cajas, unidades, umi, operario):
       fill="black",
   )
   d.text((20, 200), f"OPERARIO: {operario}", fill="gray")
-  d.text(
-      (20, 230), f"FECHA: {ahora_lima().strftime('%Y-%m-%d %H:%M')}", fill="gray"
-  )
+  d.text((20, 230), f"FECHA: {ahora_lima().strftime('%Y-%m-%d %H:%M')}", fill="gray")
 
   qr = qrcode.QRCode(box_size=4, border=1)
   qr.add_data(str(codigo))
@@ -581,9 +562,7 @@ def generar_imagen_etiqueta(codigo, producto, cajas, unidades, umi, operario):
 try:
   with st.sidebar:
     st.markdown("## 📦 Control de Empaque QR")
-    operario = st.text_input(
-        "👤 Operario", value=st.session_state.get("operario", "")
-    )
+    operario = st.text_input("👤 Operario", value=st.session_state.get("operario", ""))
     st.session_state["operario"] = operario
     st.markdown("---")
 
@@ -594,9 +573,7 @@ try:
       firma = f"{archivo.name}-{archivo.size}"
       if firma != st.session_state.get("ultimo_archivo_cargado"):
         xl_temp = pd.ExcelFile(archivo)
-        if {"data", "Receta", "factor-lima"}.issubset(
-            set(xl_temp.sheet_names)
-        ):
+        if {"data", "Receta", "factor-lima"}.issubset(set(xl_temp.sheet_names)):
           guardar_pedido(
               xl_temp.parse("data"),
               xl_temp.parse("Receta"),
@@ -619,14 +596,14 @@ try:
     if st.button("📑 Registrar Respaldo Diario (Turno)"):
       exito, msg = respaldo_diario_turno(operario)
       if exito:
-        st.success(f"Respaldo diario guardado (ID: {msg}). El acumulado continúa.")
+        st.success(f"Respaldo diario guardado (ID: {msg}).")
       else:
         st.warning(msg)
 
     if st.button("🔒 Cerrar Pedido Semanal y Reiniciar"):
       exito, msg = cerrar_pedido_semanal(operario)
       if exito:
-        st.success(f"Pedido semanal cerrado y registros limpiados. ID: {msg}")
+        st.success(f"Pedido semanal cerrado. ID: {msg}")
         st.rerun()
       else:
         st.warning(msg)
@@ -638,21 +615,21 @@ try:
       st.rerun()
 
   if pedido_df.empty or catalogo_df.empty:
-    st.title("📦 Control de Empaque Sede AREQUIPA")
+    st.title("📦 Control de Empaque QR — María Almenara")
     st.info("👈 Sube el archivo Excel en la barra lateral para iniciar.")
     st.stop()
 
   registros_df = cargar_registros()
   avance_df = calcular_avance(pedido_df, registros_df)
 
-  st.title("📦 Control de Empaque Sede AREQUIPA")
+  st.title("📦 Control de Empaque QR — María Almenara")
   
   tab1, tab2, tab3, tab4, tab5 = st.tabs([
       "📷 Escanear",
       "📊 Avance",
       "🕒 Historial",
       "🏷️ Etiquetas",
-      "⚙️ ST 014-072",
+      "⚙️ Factor M",
   ])
 
   with tab1:
@@ -688,11 +665,21 @@ try:
           if p_av >= 100:
             st.warning(
                 f"⚠️ **¡ALERTA! Este producto ya está cubierto al {p_av:.1f}%"
-                f" ({fmt_num(u_ent)} / {fmt_num(req_tot)} {umi}).** Evita"
-                " sobreproducción innecesaria."
+                f" ({fmt_num(u_ent)} / {fmt_num(req_tot)} {umi}).**"
             )
 
         st.markdown(f"**Producto:** {prod} (`{codigo_actual}`)")
+        
+        # --- NUEVO: DESGLOSE DE COMPONENTES DE LA RECETA ---
+        if "archivo_bytes_actual" in st.session_state:
+          df_comp_prod = obtener_componentes_producto(
+              codigo_actual, 
+              io.BytesIO(st.session_state["archivo_bytes_actual"])
+          )
+          if not df_comp_prod.empty:
+            with st.expander("🧪 Ver componentes / insumos de este producto", expanded=True):
+              st.dataframe(df_comp_prod, use_container_width=True, hide_index=True)
+
         cajas = st.number_input("Cajas", min_value=0.0, value=1.0, step=1.0)
         unidades = cajas * float(factor)
         st.caption(f"= {fmt_num(unidades)} {umi}")
@@ -833,7 +820,7 @@ try:
             st.rerun()
 
   with tab4:
-    st.markdown("### 🏷️ Generador de Etiquetas QR")
+    st.markdown("### 🏷️ Generador de Etiquetas QR Múltiples")
     st.markdown("Selecciona uno o varios productos para generar y descargar sus etiquetas en lote.")
 
     opciones_prod = [
@@ -890,7 +877,7 @@ try:
           st.markdown("---")
 
   with tab5:
-    st.markdown("### ⚙️ Requerimiento de Componentes (ST 014-072)")
+    st.markdown("### ⚙️ Requerimiento de Componentes (Factor M)")
     if "archivo_bytes_actual" in st.session_state:
       df_fm = calcular_componentes_factor_m(
           pedido_df,
@@ -901,11 +888,11 @@ try:
 
         buffer_excel = io.BytesIO()
         with pd.ExcelWriter(buffer_excel, engine="openpyxl") as writer:
-          df_fm.to_excel(writer, index=False, sheet_name="ST 014-072")
+          df_fm.to_excel(writer, index=False, sheet_name="Factor M")
         buffer_excel.seek(0)
 
         st.download_button(
-            label="📥 Descargar ST 014-072 a Excel",
+            label="📥 Descargar Factor M a Excel",
             data=buffer_excel,
             file_name=(
                 "requerimiento_factor_m_"
