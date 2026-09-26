@@ -395,7 +395,7 @@ def calcular_avance(
 
 
 def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=None) -> pd.DataFrame:
-  """Extrae los componentes de la hoja 'Receta' haciendo match flexible con el código del producto."""
+  """Extrae los componentes de la hoja 'Receta' haciendo match flexible y seguro de tipos."""
   try:
     if archivo_subido is not None:
       xl = pd.ExcelFile(archivo_subido)
@@ -410,12 +410,17 @@ def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=
   if df_receta.empty:
     return pd.DataFrame()
 
+  # Normalizar nombres de columnas a mayúsculas
   df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
-  codigo_buscado = str(codigo_prod).strip().upper()
-
+  
+  # Tomar la primera columna como la del código del producto principal y convertirla estrictamente a texto limpio
   col_prod = df_receta.columns[0]
   df_receta[col_prod] = df_receta[col_prod].fillna("").astype(str).str.strip().str.upper()
 
+  # Limpiar el código buscado
+  codigo_buscado = str(codigo_prod).strip().upper()
+
+  # Buscar coincidencia exacta o parcial
   matches = df_receta[df_receta[col_prod] == codigo_buscado]
   if matches.empty:
     matches = df_receta[df_receta[col_prod].str.contains(codigo_buscado, na=False)]
