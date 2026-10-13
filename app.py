@@ -492,12 +492,10 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
   col_cod_receta = "CÓDIGO" if "CÓDIGO" in df_receta.columns else df_receta.columns[0]
   col_cod_comp = 'COD COMP' if 'COD COMP' in df_receta.columns else df_receta.columns[4]
   col_desc_comp = 'COMPONENTE' if 'COMPONENTE' in df_receta.columns else df_receta.columns[5]
-  col_cant_receta = 'CANTIDAD' if 'CANTIDAD' in df_receta.columns else df_receta.columns[6]
 
   df_receta[col_cod_receta] = df_receta[col_cod_receta].fillna("").astype(str).str.strip()
   df_receta[col_cod_comp] = df_receta[col_cod_comp].fillna("").astype(str).str.strip()
   df_receta[col_desc_comp] = df_receta[col_desc_comp].fillna("").astype(str).str.strip()
-  df_receta[col_cant_receta] = pd.to_numeric(df_receta[col_cant_receta], errors="coerce").fillna(1.0)
 
   df_merged = pd.merge(
       df_receta,
@@ -507,7 +505,8 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       how="inner",
   )
 
-  df_merged["REQ_COMPONENTE"] = df_merged["REQ_REAL"] * df_merged[col_cant_receta]
+  # Tomar directamente el requerimiento del padre sin multiplicar por la cantidad de receta
+  df_merged["REQ_COMPONENTE"] = df_merged["REQ_REAL"]
 
   s_cod = df_merged[col_cod_comp]
   df_m = df_merged[
