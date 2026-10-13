@@ -511,9 +511,9 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
   df_data_limpio["CÓDIGO_PROD"] = df_data_limpio["CÓDIGO_PROD"].fillna("").astype(str).str.strip()
 
   col_cod_receta = "CÓDIGO" if "CÓDIGO" in df_receta.columns else df_receta.columns[0]
-  col_cod_comp = df_receta.columns[4] if len(df_receta.columns) > 4 else df_receta.columns[1]
-  col_desc_comp = df_receta.columns[5] if len(df_receta.columns) > 5 else col_cod_comp
-  col_cant_receta = df_receta.columns[6] if len(df_receta.columns) > 6 else df_receta.columns[-1]
+  col_cod_comp = 'COD COMP' if 'COD COMP' in df_receta.columns else df_receta.columns[4]
+  col_desc_comp = 'COMPONENTE' if 'COMPONENTE' in df_receta.columns else df_receta.columns[5]
+  col_cant_receta = 'CANTIDAD' if 'CANTIDAD' in df_receta.columns else df_receta.columns[6]
 
   df_receta[col_cod_receta] = df_receta[col_cod_receta].fillna("").astype(str).str.strip()
   df_receta[col_cod_comp] = df_receta[col_cod_comp].fillna("").astype(str).str.strip()
@@ -528,7 +528,8 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       how="inner",
   )
 
-  df_merged["REQ_COMPONENTE"] = df_merged[col_cant_receta] * df_merged["REQ_REAL"]
+  # Cálculo correcto: Requerimiento del pedido por la cantidad unitaria de cada componente en la receta
+  df_merged["REQ_COMPONENTE"] = df_merged["REQ_REAL"] * df_merged[col_cant_receta]
 
   s_cod = df_merged[col_cod_comp]
   df_m = df_merged[
