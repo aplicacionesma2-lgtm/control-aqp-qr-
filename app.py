@@ -416,32 +416,67 @@ def calcular_avance(
   return df.sort_values("pct_avance")
 
 
-def obtener_componentes_producto(codigo_prod: str, cajas: float, receta_detalle_df: pd.DataFrame) -> pd.DataFrame:
-  """Busca los componentes del código en la Receta ya guardada en Google Sheets
-  (persistente: funciona en cualquier celular, no solo en el que subió el Excel)."""
-  if receta_detalle_df is None or receta_detalle_df.empty:
+def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=None) -> pd.DataFrame:
+  """Extrae los componentes limpiando formatos de Excel (como el .0 de Pandas) y haciendo match exacto."""
+  try:
+    if archivo_subido is not None:
+      xl = pd.ExcelFile(archivo_subido)
+      if "Receta" not in xl.sheet_names:
+        return pd.DataFrame()
+      df_receta = xl.parse("Receta")
+    else:
+      return pd.DataFrame()
+  except Exception:
     return pd.DataFrame()
 
-  codigo_buscado = str(codigo_prod).strip().upper()
-  matches = receta_detalle_df[receta_detalle_df["cod_padre"].str.upper() == codigo_buscado]
+  if df_receta.empty:
+    return pd.DataFrame()
+
+  df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
+  
+  col_codigo = 'CÓDIGO' if 'CÓDIGO' in df_receta.columns else df_receta.columns[0]
+  
+  # Función auxiliar para limpiar códigos y remover el molesto .0 de pandas si existe
+  def limpiar_val(val):
+    s = str(val).strip().upper()
+    if s.endswith(".0"):
+      s = s[:-2]
+    if s in ["NAN", "NONE", "", "NAT"]:
+      return ""
+    return s
+
+  df_receta['__COD_LIMPIO'] = df_receta[col_codigo].apply(limpiar_val)
+  codigo_buscado = limpiar_val(codigo_prod)
+
+  matches = df_receta[df_receta['__COD_LIMPIO'] == codigo_buscado]
+  if matches.empty:
+    # Búsqueda flexible por contenido si la exacta no pega
+    matches = df_receta[df_receta['__COD_LIMPIO'].str.contains(codigo_buscado, na=False)]
+
   if matches.empty:
     return pd.DataFrame()
 
+  col_cod_comp = 'COD COMP' if 'COD COMP' in df_receta.columns else df_receta.columns[4]
+  col_desc_comp = 'COMPONENTE' if 'COMPONENTE' in df_receta.columns else df_receta.columns[5]
+  col_cant = 'CANTIDAD' if 'CANTIDAD' in df_receta.columns else df_receta.columns[6]
+
   resultados = []
   for _, row in matches.iterrows():
-    c_comp = str(row.get("cod_componente", "")).strip()
-    d_comp = str(row.get("componente", c_comp)).strip()
-
-    if not c_comp or c_comp.upper() in ["NAN", "NONE", "", "NAT"]:
+    c_comp = str(row.get(col_cod_comp, '')).strip()
+    d_comp = str(row.get(col_desc_comp, c_comp)).strip()
+    
+    if not c_comp or c_comp.upper() in ['NAN', 'NONE', '', 'NAT']:
       continue
 
+    cant_base = 1.0
     try:
-      cant_base = float(row.get("cantidad", 1.0)) if pd.notna(row.get("cantidad")) else 1.0
+      val_cant = row.get(col_cant, 1.0)
+      if pd.notna(val_cant):
+        cant_base = float(val_cant)
     except (TypeError, ValueError):
       cant_base = 1.0
 
     cant_total = cant_base * float(cajas)
-
     resultados.append({
         "Código Componente": c_comp,
         "Descripción Componente": d_comp if d_comp and d_comp.upper() != "NAN" else c_comp,
