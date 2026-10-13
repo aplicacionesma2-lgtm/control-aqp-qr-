@@ -131,7 +131,6 @@ HISTORIAL_CIERRES_HEADERS = [
     "total_registros",
     "total_unidades",
 ]
-RECETA_DETALLE_HEADERS = ["cod_padre", "cod_componente", "componente", "cantidad"]
 
 
 @st.cache_resource
@@ -220,18 +219,6 @@ def guardar_pedido(
       _rows_seguras(c, CATALOGO_HEADERS, {"factor"}), value_input_option="RAW"
   )
 
-  rd = receta_df[["CÓDIGO", "COD COMPONENTE", "COMPONENTE", "CANTIDAD"]].copy()
-  rd.columns = RECETA_DETALLE_HEADERS
-  rd["cod_padre"] = rd["cod_padre"].astype(str).str.strip()
-  rd["cod_componente"] = rd["cod_componente"].astype(str).str.strip()
-
-  ws_receta_detalle = get_ws("RecetaDetalle", tuple(RECETA_DETALLE_HEADERS))
-  ws_receta_detalle.clear()
-  ws_receta_detalle.append_row(RECETA_DETALLE_HEADERS, value_input_option="RAW")
-  ws_receta_detalle.append_rows(
-      _rows_seguras(rd, RECETA_DETALLE_HEADERS, {"cantidad"}), value_input_option="RAW"
-  )
-
   fl_headers = ["codigo", "descripcion", "factor"]
   ws_factor = get_ws("FactorLima", tuple(fl_headers))
   ws_factor.clear()
@@ -263,15 +250,6 @@ def cargar_pedido():
         pd.DataFrame(columns=CATALOGO_HEADERS),
         pd.DataFrame(),
     )
-
-
-@st.cache_data(ttl=5)
-def cargar_receta_detalle():
-  try:
-    ws = get_ws("RecetaDetalle", tuple(RECETA_DETALLE_HEADERS))
-    return _sheet_a_df(ws, RECETA_DETALLE_HEADERS, {"cantidad"})
-  except Exception:
-    return pd.DataFrame(columns=RECETA_DETALLE_HEADERS)
 
 
 @st.cache_data(ttl=3)
@@ -416,16 +394,17 @@ def calcular_avance(
   return df.sort_values("pct_avance")
 
 
-def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=None) -> pd.DataFrame:
-  """Extrae los componentes limpiando formatos de Excel (como el .0 de Pandas) y haciendo match exacto."""
+def obtener_componentes_producto(codigo_prod: str, cajas: float) -> pd.DataFrame:
+  """Extrae los componentes leyendo directamente desde los bytes de la sesión."""
+  if "archivo_bytes_actual" not in st.session_state:
+    return pd.DataFrame()
+
   try:
-    if archivo_subido is not None:
-      xl = pd.ExcelFile(archivo_subido)
-      if "Receta" not in xl.sheet_names:
-        return pd.DataFrame()
-      df_receta = xl.parse("Receta")
-    else:
+    buffer_bytes = io.BytesIO(st.session_state["archivo_bytes_actual"])
+    xl = pd.ExcelFile(buffer_bytes)
+    if "Receta" not in xl.sheet_names:
       return pd.DataFrame()
+    df_receta = xl.parse("Receta")
   except Exception:
     return pd.DataFrame()
 
@@ -433,10 +412,8 @@ def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=
     return pd.DataFrame()
 
   df_receta.columns = [str(c).strip().upper() for c in df_receta.columns]
-  
   col_codigo = 'CÓDIGO' if 'CÓDIGO' in df_receta.columns else df_receta.columns[0]
   
-  # Función auxiliar para limpiar códigos y remover el molesto .0 de pandas si existe
   def limpiar_val(val):
     s = str(val).strip().upper()
     if s.endswith(".0"):
@@ -450,7 +427,6 @@ def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=
 
   matches = df_receta[df_receta['__COD_LIMPIO'] == codigo_buscado]
   if matches.empty:
-    # Búsqueda flexible por contenido si la exacta no pega
     matches = df_receta[df_receta['__COD_LIMPIO'].str.contains(codigo_buscado, na=False)]
 
   if matches.empty:
@@ -463,9 +439,12 @@ def obtener_componentes_producto(codigo_prod: str, cajas: float, archivo_subido=
   resultados = []
   for _, row in matches.iterrows():
     c_comp = str(row.get(col_cod_comp, '')).strip()
+    if c_comp.endswith(".0"):
+      c_comp = c_comp[:-2]
+      
     d_comp = str(row.get(col_desc_comp, c_comp)).strip()
     
-    if not c_comp or c_comp.upper() in ['NAN', 'NONE', '', 'NAT']:
+    if not c_comp or c_comp.upper() in ['NAN', 'NONE', '', 'NAT'] or c_comp.upper() == codigo_buscado:
       continue
 
     cant_base = 1.0
@@ -528,7 +507,6 @@ def calcular_componentes_factor_m(pedido_df: pd.DataFrame, archivo_subido=None):
       how="inner",
   )
 
-  # Cálculo correcto: Requerimiento del pedido por la cantidad unitaria de cada componente en la receta
   df_merged["REQ_COMPONENTE"] = df_merged["REQ_REAL"] * df_merged[col_cant_receta]
 
   s_cod = df_merged[col_cod_comp]
@@ -680,7 +658,6 @@ try:
 
   registros_df = cargar_registros()
   avance_df = calcular_avance(pedido_df, registros_df)
-  receta_detalle_df = cargar_receta_detalle()
 
   st.title("📦 Control de Empaque QR — María Almenara")
   
@@ -739,7 +716,9 @@ try:
         st.markdown("---")
         st.markdown("### 📋 Componentes / Insumos de la Receta:")
         
-        df_comp_prod = obtener_componentes_producto(codigo_actual, cajas, receta_detalle_df)
+        df_comp_prod = pd.DataFrame()
+        if "archivo_bytes_actual" in st.session_state:
+          df_comp_prod = obtener_componentes_producto(codigo_actual, cajas)
 
         if not df_comp_prod.empty:
           for _, r in df_comp_prod.iterrows():
